@@ -1,0 +1,5 @@
+services:
+  new-api:
+    build:
+      context: .
+    image: my-new-api:latest
