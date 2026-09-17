@@ -62,7 +62,8 @@ type ModelSummary struct {
 }
 
 type SummaryAllResult struct {
-	Models []ModelSummary `json:"models"`
+	Models    []ModelSummary `json:"models"`
+	Aggregate *ModelSummary `json:"aggregate,omitempty"`
 }
 
 type bucketKey struct {

@@ -59,5 +59,6 @@ export type PerfSummaryAllData = {
   message?: string
   data: {
     models: PerfModelSummary[]
+    aggregate?: PerfModelSummary
   }
 }

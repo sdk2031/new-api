@@ -29,26 +29,24 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
   return {
     ...actual,
     useQuery: () => ({
-      data: {
-        success: true,
-        data: {
-          models: [
-            {
-              model_name: 'gpt-test',
-              avg_latency_ms: 250,
-              success_rate: 99,
-              avg_tps: 20,
-              request_count: 1000,
-              recent_success_series: [
-                {
-                  ts: Math.floor(Date.now() / 1_000 / 3_600) * 3_600,
-                  success_rate: 99,
-                },
-              ],
-            },
-          ],
+      data: [
+        {
+          group: 'default',
+          perf: {
+            model_name: '',
+            avg_latency_ms: 250,
+            success_rate: 99,
+            avg_tps: 20,
+            request_count: 1000,
+            recent_success_series: [
+              {
+                ts: Math.floor(Date.now() / 1_000 / 3_600) * 3_600,
+                success_rate: 99,
+              },
+            ],
+          },
         },
-      },
+      ],
       dataUpdatedAt: Date.UTC(2026, 0, 1),
       isLoading: false,
       isFetching: false,
@@ -65,21 +63,24 @@ vi.mock('@/features/pricing/hooks/use-pricing-data', () => ({
         model_name: 'gpt-test',
         vendor_name: 'OpenAI',
         vendor_icon: 'OpenAI',
+        enable_groups: ['all'],
+        model_ratio: 1,
+        completion_ratio: 2,
+      },
+      {
+        id: 2,
+        model_name: 'claude-test',
+        vendor_name: 'Anthropic',
+        vendor_icon: 'Claude',
         enable_groups: ['default'],
         model_ratio: 1,
         completion_ratio: 2,
       },
     ],
+    groupRatio: { default: 0.2 },
     isLoading: false,
-    priceRate: 7.3,
-    usdExchangeRate: 7.3,
+    priceRate: 10,
   }),
-}))
-
-vi.mock('@tanstack/react-router', () => ({
-  Link: (props: { children?: React.ReactNode }) => (
-    <a href='#'>{props.children}</a>
-  ),
 }))
 
 beforeEach(async () => {
@@ -92,9 +93,15 @@ afterEach(async () => {
 
 it('renders monitoring metrics and hourly details when the interface language is zhCN', async () => {
   expect(() => render(<ModelMonitoring />)).not.toThrow()
-  expect(screen.getByText('gpt-test')).toBeInTheDocument()
+  expect(screen.getAllByText('default')).toHaveLength(1)
+  expect(screen.queryByText('gpt-test')).not.toBeInTheDocument()
+  expect(screen.queryByText('claude-test')).not.toBeInTheDocument()
+  expect(
+    screen.getByText(i18next.t('{{count}} models', { count: 2 }))
+  ).toBeInTheDocument()
   expect(screen.getByText('1,000')).toBeInTheDocument()
-  expect(screen.getByText(i18next.t('Price'))).toBeInTheDocument()
+  expect(screen.getByText('0.2x')).toBeInTheDocument()
+  expect(screen.getByText('¥2 / USD')).toBeInTheDocument()
 
   const history = screen.getByRole('img', {
     name: i18next.t(

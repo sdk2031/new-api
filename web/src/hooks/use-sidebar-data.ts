@@ -84,7 +84,7 @@ export function useSidebarData(): SidebarData {
             url: '/dashboard/models',
             icon: LayoutDashboard,
           },
-          ...getCustomGeneralNavigation(t('Model monitoring')),
+          ...getCustomGeneralNavigation(t('Group monitoring')),
           {
             title: t('API Keys'),
             url: '/keys',

@@ -17,12 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import {
   CircleOff,
   Clock3,
-  ExternalLink,
   HeartPulse,
+  Layers3,
   RefreshCw,
   Search,
 } from 'lucide-react'
@@ -62,11 +61,8 @@ import {
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
 import type { PerfModelSummary } from '@/features/performance-metrics/types'
-import { ModelPriceCell } from '@/features/pricing/components/model-price-cell'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
-import type { PricingModel } from '@/features/pricing/types'
 import { toIntlLocale } from '@/i18n/languages'
-import { getLobeIcon } from '@/lib/lobe-icon'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
@@ -79,8 +75,15 @@ const ONLINE_RATE_MIN = 70
 
 type StatusFilter = 'all' | 'online' | 'offline' | 'unknown'
 
+type GroupMetricsResult = {
+  group: string
+  perf?: PerfModelSummary
+}
+
 type MonitoringRow = {
-  model: PricingModel
+  group: string
+  ratio: number
+  modelCount: number
   perf?: PerfModelSummary
   status: Exclude<StatusFilter, 'all'>
 }
@@ -100,12 +103,26 @@ export function ModelMonitoring() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [now, setNow] = useState(0)
   const pricingQuery = usePricingData()
+  const groupNames = useMemo(
+    () => Object.keys(pricingQuery.groupRatio).sort(),
+    [pricingQuery.groupRatio]
+  )
   const metricsQuery = useQuery({
-    queryKey: ['perf-metrics-summary', PERFORMANCE_WINDOW_HOURS],
-    queryFn: async () =>
-      requireServerSuccess(
-        await getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS)
+    queryKey: [
+      'perf-metrics-group-summary',
+      PERFORMANCE_WINDOW_HOURS,
+      groupNames,
+    ],
+    queryFn: async (): Promise<GroupMetricsResult[]> =>
+      Promise.all(
+        groupNames.map(async (group) => {
+          const response = requireServerSuccess(
+            await getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS, group)
+          )
+          return { group, perf: response.data.aggregate }
+        })
       ),
+    enabled: !pricingQuery.isLoading && groupNames.length > 0,
     staleTime: 30_000,
     refetchInterval: REFRESH_INTERVAL_MS,
     retry: false,
@@ -118,20 +135,26 @@ export function ModelMonitoring() {
 
   const perfMap = useMemo(
     () =>
-      new Map(
-        (metricsQuery.data?.data.models ?? []).map((perf) => [
-          perf.model_name,
-          perf,
-        ])
-      ),
+      new Map((metricsQuery.data ?? []).map((item) => [item.group, item.perf])),
     [metricsQuery.data]
   )
 
   const rows = useMemo<MonitoringRow[]>(() => {
-    return pricingQuery.models
-      .map((model) => {
-        const perf = perfMap.get(model.model_name)
-        return { model, perf, status: getMonitoringStatus(perf) }
+    return groupNames
+      .map((group) => {
+        const perf = perfMap.get(group)
+        const modelCount = pricingQuery.models.filter(
+          (model) =>
+            model.enable_groups?.includes(group) ||
+            model.enable_groups?.includes('all')
+        ).length
+        return {
+          group,
+          ratio: pricingQuery.groupRatio[group],
+          modelCount,
+          perf,
+          status: getMonitoringStatus(perf),
+        }
       })
       .sort((left, right) => {
         if (left.status === 'unknown' && right.status !== 'unknown') return 1
@@ -139,21 +162,15 @@ export function ModelMonitoring() {
         if (left.perf && right.perf) {
           return left.perf.success_rate - right.perf.success_rate
         }
-        return left.model.model_name.localeCompare(right.model.model_name)
+        return left.group.localeCompare(right.group)
       })
-  }, [perfMap, pricingQuery.models])
+  }, [groupNames, perfMap, pricingQuery.groupRatio, pricingQuery.models])
 
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (statusFilter !== 'all' && row.status !== statusFilter) return false
       if (!deferredSearch) return true
-      return [
-        row.model.model_name,
-        row.model.vendor_name,
-        ...(row.model.enable_groups ?? []),
-      ]
-        .filter(Boolean)
-        .some((value) => value?.toLowerCase().includes(deferredSearch))
+      return row.group.toLowerCase().includes(deferredSearch)
     })
   }, [deferredSearch, rows, statusFilter])
 
@@ -197,7 +214,7 @@ export function ModelMonitoring() {
       <SectionPageLayout.Title>
         <span className='flex items-center gap-2'>
           <HeartPulse className='size-5 text-emerald-500' />
-          {t('Model monitoring')}
+          {t('Group monitoring')}
         </span>
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
@@ -224,7 +241,7 @@ export function ModelMonitoring() {
           <div>
             <p className='text-muted-foreground text-sm'>
               {t(
-                'Monitor model availability, latency, and throughput from real API traffic.'
+                'Monitor group availability, latency, and throughput from real API traffic.'
               )}
             </p>
             <p className='text-muted-foreground/70 mt-1 text-xs'>
@@ -261,7 +278,7 @@ export function ModelMonitoring() {
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder={t('Search models')}
+                placeholder={t('Search groups')}
                 className='pl-8'
               />
             </div>
@@ -297,7 +314,6 @@ export function ModelMonitoring() {
             loading={loading}
             rows={filteredRows}
             priceRate={pricingQuery.priceRate}
-            usdExchangeRate={pricingQuery.usdExchangeRate}
           />
         </div>
       </SectionPageLayout.Content>
@@ -321,18 +337,15 @@ function SummaryMetric(props: { label: string; value: string; tone: string }) {
   )
 }
 
-function MonitoringCard(props: {
-  row: MonitoringRow
-  priceRate: number
-  usdExchangeRate: number
-}) {
+function MonitoringCard(props: { row: MonitoringRow; priceRate: number }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
-  const { model, perf, status } = props.row
-  const modelIconKey = model.icon || model.vendor_icon
-  const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 26) : null
-  const groups = (model.enable_groups ?? []).filter((group) => group !== 'auto')
+  const { group, ratio, modelCount, perf, status } = props.row
   const successRate = perf?.success_rate ?? Number.NaN
+  const numberFormatter = new Intl.NumberFormat(locale, {
+    maximumFractionDigits: 6,
+  })
+  const effectivePrice = numberFormatter.format(ratio * props.priceRate)
   let statusLabel = t('No data')
   if (status === 'online') statusLabel = t('Online')
   if (status === 'offline') statusLabel = t('Offline')
@@ -342,18 +355,14 @@ function MonitoringCard(props: {
       <CardHeader className='grid-cols-[1fr_auto] px-3'>
         <div className='flex min-w-0 items-center gap-2.5'>
           <div className='bg-muted flex size-9 shrink-0 items-center justify-center rounded-lg'>
-            {modelIcon ?? (
-              <span className='font-mono text-sm font-semibold'>
-                {model.model_name.charAt(0).toUpperCase()}
-              </span>
-            )}
+            <Layers3 className='size-5' />
           </div>
           <div className='min-w-0'>
             <CardTitle className='truncate font-mono text-sm'>
-              {model.model_name}
+              {group}
             </CardTitle>
             <CardDescription className='truncate text-xs'>
-              {model.vendor_name || t('Unknown')}
+              {t('{{count}} models', { count: modelCount })}
             </CardDescription>
           </div>
         </div>
@@ -405,62 +414,28 @@ function MonitoringCard(props: {
           barClassName='min-w-0 flex-1 rounded-sm'
         />
 
-        <div className='border-border/60 grid grid-cols-[auto_minmax(0,1fr)] gap-3 border-t pt-3'>
-          <span className='text-muted-foreground text-[11px]'>
-            {t('Price')}
-          </span>
-          <ModelPriceCell
-            model={model}
-            options={{
-              tokenUnit: 'M',
-              priceRate: props.priceRate,
-              usdExchangeRate: props.usdExchangeRate,
-            }}
-            showExpression={false}
-          />
-        </div>
-
-        {groups.length > 0 && (
-          <div className='flex min-w-0 items-center gap-1.5 overflow-hidden'>
-            <span className='text-muted-foreground shrink-0 text-[11px]'>
-              {t('Groups')}
-            </span>
-            {groups.slice(0, 2).map((group) => (
-              <Badge
-                key={group}
-                variant='secondary'
-                className='max-w-32 truncate'
-              >
-                {group}
-              </Badge>
-            ))}
-            {groups.length > 2 && (
-              <span className='text-muted-foreground text-xs'>
-                +{groups.length - 2}
-              </span>
-            )}
+        <div className='border-border/60 grid grid-cols-2 gap-3 border-t pt-3'>
+          <div>
+            <div className='text-muted-foreground text-[11px]'>
+              {t('Group Ratio')}
+            </div>
+            <div className='mt-1 font-mono text-sm font-semibold tabular-nums'>
+              {numberFormatter.format(ratio)}x
+            </div>
           </div>
-        )}
+          <div className='text-right'>
+            <div className='text-muted-foreground text-[11px]'>
+              {t('Effective price')}
+            </div>
+            <div className='mt-1 font-mono text-sm font-semibold tabular-nums'>
+              ¥{effectivePrice} / USD
+            </div>
+          </div>
+        </div>
       </CardContent>
 
-      <div className='border-border/60 mx-3 flex items-center justify-between border-t pt-2'>
+      <div className='border-border/60 mx-3 border-t pt-2'>
         <ModelMetrics perf={perf} />
-        <div>
-          <Button
-            variant='ghost'
-            size='icon-sm'
-            title={t('Details')}
-            render={
-              <Link
-                to='/pricing/$modelId'
-                params={{ modelId: model.model_name }}
-              />
-            }
-          >
-            <ExternalLink />
-            <span className='sr-only'>{t('Details')}</span>
-          </Button>
-        </div>
       </div>
     </Card>
   )
@@ -470,7 +445,6 @@ function MonitoringResults(props: {
   loading: boolean
   rows: MonitoringRow[]
   priceRate: number
-  usdExchangeRate: number
 }) {
   const { t } = useTranslation()
 
@@ -481,10 +455,9 @@ function MonitoringResults(props: {
       <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3'>
         {props.rows.map((row) => (
           <MonitoringCard
-            key={row.model.id ?? row.model.model_name}
+            key={row.group}
             row={row}
             priceRate={props.priceRate}
-            usdExchangeRate={props.usdExchangeRate}
           />
         ))}
       </div>
@@ -497,9 +470,9 @@ function MonitoringResults(props: {
         <EmptyMedia variant='icon'>
           <CircleOff />
         </EmptyMedia>
-        <EmptyTitle>{t('No models match the current filters')}</EmptyTitle>
+        <EmptyTitle>{t('No groups match the current filters')}</EmptyTitle>
         <EmptyDescription>
-          {t('No performance data available')}
+          {t('No group performance data available')}
         </EmptyDescription>
       </EmptyHeader>
     </Empty>
