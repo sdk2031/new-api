@@ -680,6 +680,7 @@
     "Automatically replaces upstream callback URLs with the server address.": "Automatically replaces upstream callback URLs with the server address.",
     "Automatically selects the best available group with circuit breaker mechanism": "Automatically selects the best available group with circuit breaker mechanism",
     "Automatically sync model list when upstream changes are detected": "Automatically sync model list when upstream changes are detected",
+    "Availability": "Availability",
     "Availability (last 24h)": "Availability (last 24h)",
     "Available": "Available",
     "Available Balance": "Available Balance",

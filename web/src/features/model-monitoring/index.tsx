@@ -62,8 +62,10 @@ import {
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
 import type { PerfModelSummary } from '@/features/performance-metrics/types'
+import { ModelPriceCell } from '@/features/pricing/components/model-price-cell'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import type { PricingModel } from '@/features/pricing/types'
+import { toIntlLocale } from '@/i18n/languages'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
@@ -92,6 +94,7 @@ function getMonitoringStatus(
 
 export function ModelMonitoring() {
   const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -181,7 +184,7 @@ export function ModelMonitoring() {
         )
       : 0
   const updatedAt = metricsQuery.dataUpdatedAt
-    ? new Intl.DateTimeFormat(i18n.language, {
+    ? new Intl.DateTimeFormat(locale, {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
@@ -232,17 +235,17 @@ export function ModelMonitoring() {
           <div className='bg-card grid grid-cols-2 overflow-hidden rounded-lg border sm:grid-cols-4'>
             <SummaryMetric
               label={t('Online')}
-              value={summary.online.toLocaleString(i18n.language)}
+              value={summary.online.toLocaleString(locale)}
               tone='text-emerald-600 dark:text-emerald-400'
             />
             <SummaryMetric
               label={t('Offline')}
-              value={summary.offline.toLocaleString(i18n.language)}
+              value={summary.offline.toLocaleString(locale)}
               tone='text-red-600 dark:text-red-400'
             />
             <SummaryMetric
               label={t('No data')}
-              value={summary.unknown.toLocaleString(i18n.language)}
+              value={summary.unknown.toLocaleString(locale)}
               tone='text-muted-foreground'
             />
             <SummaryMetric
@@ -290,7 +293,12 @@ export function ModelMonitoring() {
             </div>
           </div>
 
-          <MonitoringResults loading={loading} rows={filteredRows} />
+          <MonitoringResults
+            loading={loading}
+            rows={filteredRows}
+            priceRate={pricingQuery.priceRate}
+            usdExchangeRate={pricingQuery.usdExchangeRate}
+          />
         </div>
       </SectionPageLayout.Content>
     </SectionPageLayout>
@@ -313,9 +321,14 @@ function SummaryMetric(props: { label: string; value: string; tone: string }) {
   )
 }
 
-function MonitoringCard({ row }: { row: MonitoringRow }) {
+function MonitoringCard(props: {
+  row: MonitoringRow
+  priceRate: number
+  usdExchangeRate: number
+}) {
   const { t, i18n } = useTranslation()
-  const { model, perf, status } = row
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const { model, perf, status } = props.row
   const modelIconKey = model.icon || model.vendor_icon
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 26) : null
   const groups = (model.enable_groups ?? []).filter((group) => group !== 'auto')
@@ -381,7 +394,7 @@ function MonitoringCard({ row }: { row: MonitoringRow }) {
               {t('Requests')}
             </div>
             <div className='mt-0.5 font-mono text-sm font-semibold tabular-nums'>
-              {(perf?.request_count ?? 0).toLocaleString(i18n.language)}
+              {(perf?.request_count ?? 0).toLocaleString(locale)}
             </div>
           </div>
         </div>
@@ -391,6 +404,21 @@ function MonitoringCard({ row }: { row: MonitoringRow }) {
           className='h-6 w-full gap-1'
           barClassName='min-w-0 flex-1 rounded-sm'
         />
+
+        <div className='border-border/60 grid grid-cols-[auto_minmax(0,1fr)] gap-3 border-t pt-3'>
+          <span className='text-muted-foreground text-[11px]'>
+            {t('Price')}
+          </span>
+          <ModelPriceCell
+            model={model}
+            options={{
+              tokenUnit: 'M',
+              priceRate: props.priceRate,
+              usdExchangeRate: props.usdExchangeRate,
+            }}
+            showExpression={false}
+          />
+        </div>
 
         {groups.length > 0 && (
           <div className='flex min-w-0 items-center gap-1.5 overflow-hidden'>
@@ -438,7 +466,12 @@ function MonitoringCard({ row }: { row: MonitoringRow }) {
   )
 }
 
-function MonitoringResults(props: { loading: boolean; rows: MonitoringRow[] }) {
+function MonitoringResults(props: {
+  loading: boolean
+  rows: MonitoringRow[]
+  priceRate: number
+  usdExchangeRate: number
+}) {
   const { t } = useTranslation()
 
   if (props.loading) return <MonitoringSkeleton />
@@ -450,6 +483,8 @@ function MonitoringResults(props: { loading: boolean; rows: MonitoringRow[] }) {
           <MonitoringCard
             key={row.model.id ?? row.model.model_name}
             row={row}
+            priceRate={props.priceRate}
+            usdExchangeRate={props.usdExchangeRate}
           />
         ))}
       </div>
