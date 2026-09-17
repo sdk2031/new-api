@@ -61,9 +61,16 @@ type ModelSummary struct {
 	RequestCount        int64              `json:"-"`
 }
 
+type GroupSummaryInfo struct {
+	Group      string  `json:"group"`
+	Ratio      float64 `json:"ratio"`
+	ModelCount int     `json:"model_count"`
+}
+
 type SummaryAllResult struct {
-	Models    []ModelSummary `json:"models"`
-	Aggregate *ModelSummary `json:"aggregate,omitempty"`
+	Models    []ModelSummary     `json:"models"`
+	Aggregate *ModelSummary     `json:"aggregate,omitempty"`
+	Groups    []GroupSummaryInfo `json:"groups,omitempty"`
 }
 
 type bucketKey struct {

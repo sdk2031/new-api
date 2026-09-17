@@ -87,6 +87,23 @@ func TestHeaderNavModuleAuthAllowsDefaultPublicAccess(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 }
 
+func TestHeaderNavModuleAuthRequiresLoginForDefaultMonitoring(t *testing.T) {
+	withHeaderNavModules(t, "")
+
+	recorder := performHeaderNavRequest(t, HeaderNavModuleAuth("monitoring"), false)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+}
+
+func TestHeaderNavModuleAuthAllowsPublicMonitoring(t *testing.T) {
+	raw := `{"monitoring":{"enabled":true,"requireAuth":false}}`
+	withHeaderNavModules(t, raw)
+
+	recorder := performHeaderNavRequest(t, HeaderNavModuleAuth("monitoring"), false)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+}
+
 func TestHeaderNavModuleAuthRejectsDisabledPricing(t *testing.T) {
 	raw := `{"pricing":{"enabled":false,"requireAuth":false}}`
 	withHeaderNavModules(t, raw)

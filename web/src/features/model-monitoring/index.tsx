@@ -60,8 +60,11 @@ import {
   getSuccessRateDotClass,
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
-import type { PerfModelSummary } from '@/features/performance-metrics/types'
-import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
+import type {
+  PerfGroupSummaryInfo,
+  PerfModelSummary,
+} from '@/features/performance-metrics/types'
+import { useStatus } from '@/hooks/use-status'
 import { toIntlLocale } from '@/i18n/languages'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
@@ -78,6 +81,11 @@ type StatusFilter = 'all' | 'online' | 'offline' | 'unknown'
 type GroupMetricsResult = {
   group: string
   perf?: PerfModelSummary
+}
+
+type GroupMonitoringResult = {
+  groups: PerfGroupSummaryInfo[]
+  metrics: GroupMetricsResult[]
 }
 
 type MonitoringRow = {
@@ -102,27 +110,27 @@ export function ModelMonitoring() {
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [now, setNow] = useState(0)
-  const pricingQuery = usePricingData()
-  const groupNames = useMemo(
-    () => Object.keys(pricingQuery.groupRatio).sort(),
-    [pricingQuery.groupRatio]
-  )
+  const { status } = useStatus()
   const metricsQuery = useQuery({
-    queryKey: [
-      'perf-metrics-group-summary',
-      PERFORMANCE_WINDOW_HOURS,
-      groupNames,
-    ],
-    queryFn: async (): Promise<GroupMetricsResult[]> =>
-      Promise.all(
-        groupNames.map(async (group) => {
+    queryKey: ['perf-metrics-group-summary', PERFORMANCE_WINDOW_HOURS],
+    queryFn: async (): Promise<GroupMonitoringResult> => {
+      const overview = requireServerSuccess(
+        await getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS)
+      )
+      const groups = overview.data.groups ?? []
+      const metrics = await Promise.all(
+        groups.map(async (groupInfo) => {
           const response = requireServerSuccess(
-            await getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS, group)
+            await getPerfMetricsSummary(
+              PERFORMANCE_WINDOW_HOURS,
+              groupInfo.group
+            )
           )
-          return { group, perf: response.data.aggregate }
+          return { group: groupInfo.group, perf: response.data.aggregate }
         })
-      ),
-    enabled: !pricingQuery.isLoading && groupNames.length > 0,
+      )
+      return { groups, metrics }
+    },
     staleTime: 30_000,
     refetchInterval: REFRESH_INTERVAL_MS,
     retry: false,
@@ -135,23 +143,23 @@ export function ModelMonitoring() {
 
   const perfMap = useMemo(
     () =>
-      new Map((metricsQuery.data ?? []).map((item) => [item.group, item.perf])),
+      new Map(
+        (metricsQuery.data?.metrics ?? []).map((item) => [
+          item.group,
+          item.perf,
+        ])
+      ),
     [metricsQuery.data]
   )
 
   const rows = useMemo<MonitoringRow[]>(() => {
-    return groupNames
-      .map((group) => {
-        const perf = perfMap.get(group)
-        const modelCount = pricingQuery.models.filter(
-          (model) =>
-            model.enable_groups?.includes(group) ||
-            model.enable_groups?.includes('all')
-        ).length
+    return (metricsQuery.data?.groups ?? [])
+      .map((groupInfo) => {
+        const perf = perfMap.get(groupInfo.group)
         return {
-          group,
-          ratio: pricingQuery.groupRatio[group],
-          modelCount,
+          group: groupInfo.group,
+          ratio: groupInfo.ratio,
+          modelCount: groupInfo.model_count,
           perf,
           status: getMonitoringStatus(perf),
         }
@@ -164,7 +172,7 @@ export function ModelMonitoring() {
         }
         return left.group.localeCompare(right.group)
       })
-  }, [groupNames, perfMap, pricingQuery.groupRatio, pricingQuery.models])
+  }, [metricsQuery.data?.groups, perfMap])
 
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
@@ -207,7 +215,9 @@ export function ModelMonitoring() {
         second: '2-digit',
       }).format(metricsQuery.dataUpdatedAt)
     : '—'
-  const loading = pricingQuery.isLoading || metricsQuery.isLoading
+  const rawPriceRate = Number(status?.price)
+  const priceRate =
+    Number.isFinite(rawPriceRate) && rawPriceRate >= 0 ? rawPriceRate : 1
 
   return (
     <SectionPageLayout>
@@ -311,9 +321,9 @@ export function ModelMonitoring() {
           </div>
 
           <MonitoringResults
-            loading={loading}
+            loading={metricsQuery.isLoading}
             rows={filteredRows}
-            priceRate={pricingQuery.priceRate}
+            priceRate={priceRate}
           />
         </div>
       </SectionPageLayout.Content>

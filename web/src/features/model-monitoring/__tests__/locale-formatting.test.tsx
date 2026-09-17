@@ -29,24 +29,27 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
   return {
     ...actual,
     useQuery: () => ({
-      data: [
-        {
-          group: 'default',
-          perf: {
-            model_name: '',
-            avg_latency_ms: 250,
-            success_rate: 99,
-            avg_tps: 20,
-            request_count: 1000,
-            recent_success_series: [
-              {
-                ts: Math.floor(Date.now() / 1_000 / 3_600) * 3_600,
-                success_rate: 99,
-              },
-            ],
+      data: {
+        groups: [{ group: 'default', ratio: 0.2, model_count: 2 }],
+        metrics: [
+          {
+            group: 'default',
+            perf: {
+              model_name: '',
+              avg_latency_ms: 250,
+              success_rate: 99,
+              avg_tps: 20,
+              request_count: 1000,
+              recent_success_series: [
+                {
+                  ts: Math.floor(Date.now() / 1_000 / 3_600) * 3_600,
+                  success_rate: 99,
+                },
+              ],
+            },
           },
-        },
-      ],
+        ],
+      },
       dataUpdatedAt: Date.UTC(2026, 0, 1),
       isLoading: false,
       isFetching: false,
@@ -55,32 +58,8 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
   }
 })
 
-vi.mock('@/features/pricing/hooks/use-pricing-data', () => ({
-  usePricingData: () => ({
-    models: [
-      {
-        id: 1,
-        model_name: 'gpt-test',
-        vendor_name: 'OpenAI',
-        vendor_icon: 'OpenAI',
-        enable_groups: ['all'],
-        model_ratio: 1,
-        completion_ratio: 2,
-      },
-      {
-        id: 2,
-        model_name: 'claude-test',
-        vendor_name: 'Anthropic',
-        vendor_icon: 'Claude',
-        enable_groups: ['default'],
-        model_ratio: 1,
-        completion_ratio: 2,
-      },
-    ],
-    groupRatio: { default: 0.2 },
-    isLoading: false,
-    priceRate: 10,
-  }),
+vi.mock('@/hooks/use-status', () => ({
+  useStatus: () => ({ status: { price: 10 } }),
 }))
 
 beforeEach(async () => {

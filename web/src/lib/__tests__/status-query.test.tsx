@@ -99,7 +99,11 @@ describe('shared status query deduplication', () => {
           STATUS_QUERY_KEY,
           {
             system_name: 'old',
-            HeaderNavModules: { pricing: false, rankings: false },
+            HeaderNavModules: {
+              pricing: false,
+              monitoring: false,
+              rankings: false,
+            },
           },
           { updatedAt: Date.now() - 600_000 }
         )
@@ -108,6 +112,7 @@ describe('shared status query deduplication', () => {
         system_name: 'shared',
         HeaderNavModules: {
           pricing: { enabled: true, requireAuth: true },
+          monitoring: { enabled: true, requireAuth: true },
           rankings: { enabled: true, requireAuth: false },
         },
       }
@@ -122,6 +127,7 @@ describe('shared status query deduplication', () => {
       let guardsResolved = false
       const guards = Promise.all([
         getModuleAccessForGuard(queryClient, 'pricing'),
+        getModuleAccessForGuard(queryClient, 'monitoring'),
         getModuleAccessForGuard(queryClient, 'rankings'),
       ]).then((result) => {
         guardsResolved = true
@@ -134,6 +140,7 @@ describe('shared status query deduplication', () => {
       expect(guardsResolved).toBe(false)
       resolveStatus({ data: { success: true, data: status } })
       expect(await guards).toEqual([
+        { enabled: true, requireAuth: true },
         { enabled: true, requireAuth: true },
         { enabled: true, requireAuth: false },
       ])
@@ -185,6 +192,11 @@ describe('module guard status freshness', () => {
     {
       module: 'pricing',
       before: { enabled: false, requireAuth: false },
+      after: { enabled: true, requireAuth: false },
+    },
+    {
+      module: 'monitoring',
+      before: { enabled: true, requireAuth: true },
       after: { enabled: true, requireAuth: false },
     },
     {

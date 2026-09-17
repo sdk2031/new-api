@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect, useMemo } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import * as z from 'zod'
 
@@ -53,6 +53,8 @@ const headerNavSchema = z.object({
   console: z.boolean(),
   pricingEnabled: z.boolean(),
   pricingRequireAuth: z.boolean(),
+  monitoringEnabled: z.boolean(),
+  monitoringRequireAuth: z.boolean(),
   rankingsEnabled: z.boolean(),
   rankingsRequireAuth: z.boolean(),
   docs: z.boolean(),
@@ -81,6 +83,14 @@ const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
     config.pricing?.requireAuth === undefined
       ? HEADER_NAV_DEFAULT.pricing.requireAuth
       : Boolean(config.pricing.requireAuth),
+  monitoringEnabled:
+    config.monitoring?.enabled === undefined
+      ? HEADER_NAV_DEFAULT.monitoring.enabled
+      : Boolean(config.monitoring.enabled),
+  monitoringRequireAuth:
+    config.monitoring?.requireAuth === undefined
+      ? HEADER_NAV_DEFAULT.monitoring.requireAuth
+      : Boolean(config.monitoring.requireAuth),
   rankingsEnabled:
     config.rankings?.enabled === undefined
       ? HEADER_NAV_DEFAULT.rankings.enabled
@@ -109,6 +119,7 @@ export function HeaderNavigationSection({
     resolver: zodResolver(headerNavSchema),
     defaultValues: formDefaults,
   })
+  const watchedValues = useWatch({ control: form.control })
 
   useEffect(() => {
     form.reset(formDefaults)
@@ -125,6 +136,11 @@ export function HeaderNavigationSection({
         ...(config.pricing ?? HEADER_NAV_DEFAULT.pricing),
         enabled: values.pricingEnabled,
         requireAuth: values.pricingRequireAuth,
+      },
+      monitoring: {
+        ...(config.monitoring ?? HEADER_NAV_DEFAULT.monitoring),
+        enabled: values.monitoringEnabled,
+        requireAuth: values.monitoringRequireAuth,
       },
       rankings: {
         ...(config.rankings ?? HEADER_NAV_DEFAULT.rankings),
@@ -178,7 +194,10 @@ export function HeaderNavigationSection({
   const accessModules: Array<{
     enabledKey: keyof HeaderNavFormValues
     requireAuthKey: keyof HeaderNavFormValues
-    requireAuthDependsOn: 'pricingEnabled' | 'rankingsEnabled'
+    requireAuthDependsOn:
+      | 'pricingEnabled'
+      | 'monitoringEnabled'
+      | 'rankingsEnabled'
     title: string
     description: string
     requireAuthTitle: string
@@ -193,6 +212,17 @@ export function HeaderNavigationSection({
       requireAuthTitle: t('Require login to view models'),
       requireAuthDescription: t(
         'Visitors must authenticate before accessing the pricing directory.'
+      ),
+    },
+    {
+      enabledKey: 'monitoringEnabled',
+      requireAuthKey: 'monitoringRequireAuth',
+      requireAuthDependsOn: 'monitoringEnabled',
+      title: t('Group monitoring'),
+      description: t('Group availability and performance monitoring.'),
+      requireAuthTitle: t('Require login to view group monitoring'),
+      requireAuthDescription: t(
+        'Visitors must authenticate before accessing group monitoring.'
       ),
     },
     {
@@ -283,7 +313,10 @@ export function HeaderNavigationSection({
                           <Switch
                             checked={field.value}
                             onCheckedChange={field.onChange}
-                            disabled={!form.watch(module.requireAuthDependsOn)}
+                            disabled={
+                              watchedValues[module.requireAuthDependsOn] !==
+                              true
+                            }
                           />
                         </FormControl>
                         <FormMessage />
