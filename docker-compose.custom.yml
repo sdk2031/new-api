@@ -1,5 +1,3 @@
 services:
   new-api:
-    build:
-      context: .
-    image: my-new-api:latest
+    image: ghcr.io/sdk2031/new-api-custom:latest

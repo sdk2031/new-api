@@ -30,10 +30,10 @@ git switch codex/model-monitoring
 .\scripts\update-with-customizations.ps1
 ```
 
-To merge upstream and immediately rebuild the custom image:
+Push the merged branch to trigger the GitHub Actions image build:
 
 ```powershell
-.\scripts\update-with-customizations.ps1 -Build
+git push origin codex/model-monitoring
 ```
 
 If Git reports a conflict, resolve it on the customization branch and commit
@@ -43,12 +43,14 @@ upstream navigation refactor.
 
 ## Deploy the custom build
 
-The official `calciumion/new-api:latest` image does not contain this page. Build
-and deploy the local image through the Compose override:
+The official `calciumion/new-api:latest` image does not contain this page. The
+custom branch publishes `ghcr.io/sdk2031/new-api-custom:latest` through GitHub
+Actions. Deploy it through the Compose override without building on the server:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.custom.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.custom.yml pull new-api
+docker compose -f docker-compose.yml -f docker-compose.custom.yml up -d new-api
 ```
 
 This override leaves the upstream `docker-compose.yml` unchanged while forcing
-the `new-api` service to use `my-new-api:latest` built from this checkout.
+the `new-api` service to use the GHCR image built from the customization branch.

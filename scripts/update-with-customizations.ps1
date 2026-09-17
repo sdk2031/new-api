@@ -1,7 +1,5 @@
 [CmdletBinding()]
 param(
-    [switch]$Build,
-    [string]$ImageTag = 'my-new-api:latest',
     [string]$CustomizationBranch = 'codex/model-monitoring'
 )
 
@@ -26,26 +24,18 @@ try {
         throw "Switch to the customization branch first: git switch $CustomizationBranch"
     }
 
-    Write-Host "Updating $branch from origin/main..."
-    git fetch origin main
+    Write-Host "Updating $branch from upstream/main..."
+    git fetch upstream main
     if ($LASTEXITCODE -ne 0) {
         throw 'git fetch failed.'
     }
 
-    git merge --no-edit origin/main
+    git merge --no-edit upstream/main
     if ($LASTEXITCODE -ne 0) {
         throw 'git merge failed. Resolve the reported conflicts, then commit the merge.'
     }
 
-    if ($Build) {
-        Write-Host "Building custom image $ImageTag..."
-        docker build -t $ImageTag .
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Docker image build failed.'
-        }
-    }
-
-    Write-Host 'Customization branch updated successfully.'
+    Write-Host 'Customization branch updated. Push it to trigger GitHub Actions.'
 }
 finally {
     Pop-Location
