@@ -86,7 +86,6 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
     <div
       role='img'
       aria-label={t('Performance in the latest 24 five-minute intervals.')}
-      title={t('Performance in the latest 24 five-minute intervals.')}
       className={cn(
         'grid h-3 w-24 grid-cols-[repeat(24,minmax(0,1fr))] items-center gap-px',
         className
@@ -142,10 +141,6 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
                 <span>{t('Throughput')}:</span>
                 <span className='text-right font-mono'>
                   {formatThroughput(point.metrics.avg_tps)}
-                </span>
-                <span>{t('Requests')}:</span>
-                <span className='text-right font-mono'>
-                  {point.metrics.request_count.toLocaleString(locale)}
                 </span>
               </div>
             </TooltipContent>

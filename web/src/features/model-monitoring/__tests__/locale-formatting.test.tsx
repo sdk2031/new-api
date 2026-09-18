@@ -162,6 +162,7 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
   const history = within(defaultGroupCard).getByRole('img', {
     name: i18next.t('Performance in the latest 24 five-minute intervals.'),
   })
+  expect(history).not.toHaveAttribute('title')
   const bars = history.querySelectorAll('[data-slot="tooltip-trigger"]')
   expect(bars).toHaveLength(24)
   fireEvent.focus(bars.item(bars.length - 1))
@@ -175,8 +176,9 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
       screen.getByText(`${i18next.t('Average latency')}:`)
     ).toBeInTheDocument()
     expect(screen.getByText(`${i18next.t('Throughput')}:`)).toBeInTheDocument()
-    expect(screen.getByText(`${i18next.t('Requests')}:`)).toBeInTheDocument()
-    expect(screen.getByText('12')).toBeInTheDocument()
+    expect(
+      screen.queryByText(`${i18next.t('Requests')}:`)
+    ).not.toBeInTheDocument()
   })
 })
 
