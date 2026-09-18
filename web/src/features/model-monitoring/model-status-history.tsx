@@ -59,6 +59,7 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
       .sort((left, right) => left.ts - right.ts)
       .slice(-MAX_STATUS_RECORDS)
   }, [series])
+  const emptySlots = MAX_STATUS_RECORDS - statusPoints.length
   const timeFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
@@ -80,9 +81,20 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
       title={t(
         'Latest 24 performance records at five-minute intervals.'
       )}
-      className={cn('flex h-3 w-24 items-center gap-px', className)}
+      className={cn(
+        'grid h-3 w-24 grid-cols-[repeat(24,minmax(0,1fr))] items-center gap-px',
+        className
+      )}
       {...rest}
     >
+      {Array.from({ length: emptySlots }, (_, index) => (
+        <span
+          key={`empty-${index}`}
+          data-slot='status-empty'
+          aria-hidden='true'
+          className='h-full min-w-0'
+        />
+      ))}
       {statusPoints.map((point) => {
         const rate = point.success_rate
         let statusLabel = t('No data')

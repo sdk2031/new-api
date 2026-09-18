@@ -77,7 +77,6 @@ const PERFORMANCE_WINDOW_HOURS = 24
 const REFRESH_INTERVAL_MS = 30_000
 const NORMAL_RATE_MIN = 90
 const FLUCTUATING_RATE_MIN = 70
-const RECENT_STATUS_MAX_AGE_SECONDS = 15 * 60
 
 type StatusFilter = 'all' | 'normal' | 'fluctuating' | 'abnormal' | 'unknown'
 
@@ -95,17 +94,13 @@ type MonitoringRow = {
   group: string
   sortOrder: number
   effectivePrice: number
-  hasEnabledModels: boolean
   perf?: PerfModelSummary
   status: Exclude<StatusFilter, 'all'>
 }
 
 function getMonitoringStatus(
-  perf: PerfModelSummary | undefined,
-  hasEnabledModels: boolean
+  perf: PerfModelSummary | undefined
 ): MonitoringRow['status'] {
-  if (!hasEnabledModels) return 'abnormal'
-
   const latestPoint = (perf?.recent_interval_series ?? []).reduce<
     PerformanceIntervalPoint | undefined
   >((latest, point) => {
@@ -113,15 +108,10 @@ function getMonitoringStatus(
     if (!latest || point.ts > latest.ts) return point
     return latest
   }, undefined)
-  const nowSeconds = Math.floor(Date.now() / 1_000)
-  if (
-    !latestPoint ||
-    latestPoint.ts < nowSeconds - RECENT_STATUS_MAX_AGE_SECONDS
-  ) {
-    return 'normal'
-  }
-  if (latestPoint.success_rate >= NORMAL_RATE_MIN) return 'normal'
-  if (latestPoint.success_rate >= FLUCTUATING_RATE_MIN) return 'fluctuating'
+  const successRate = latestPoint?.success_rate ?? perf?.success_rate
+  if (successRate == null || !Number.isFinite(successRate)) return 'unknown'
+  if (successRate >= NORMAL_RATE_MIN) return 'normal'
+  if (successRate >= FLUCTUATING_RATE_MIN) return 'fluctuating'
   return 'abnormal'
 }
 
@@ -188,14 +178,12 @@ export function ModelMonitoring() {
     return (metricsQuery.data?.groups ?? [])
       .map((groupInfo) => {
         const perf = perfMap.get(groupInfo.group)
-        const hasEnabledModels = (groupInfo.enabled_model_count ?? 1) > 0
         return {
           group: groupInfo.group,
           sortOrder: groupInfo.sort_order ?? 0,
           effectivePrice: groupInfo.ratio * priceRate,
-          hasEnabledModels,
           perf,
-          status: getMonitoringStatus(perf, hasEnabledModels),
+          status: getMonitoringStatus(perf),
         }
       })
       .sort((left, right) => {
@@ -465,7 +453,7 @@ function MonitoringCard(props: { row: MonitoringRow }) {
         <ModelStatusHistory
           series={perf?.recent_interval_series}
           className='h-6 w-full gap-1'
-          barClassName='min-w-0 flex-1 rounded-sm'
+          barClassName='w-full rounded-sm'
         />
       </CardContent>
     </Card>

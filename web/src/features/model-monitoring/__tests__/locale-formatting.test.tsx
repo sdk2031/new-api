@@ -42,13 +42,11 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
             group: 'default',
             ratio: 0.2,
             sort_order: 10,
-            enabled_model_count: 3,
           },
           {
             group: 'vip',
             ratio: 0.3,
             sort_order: 20,
-            enabled_model_count: 2,
           },
         ],
         metrics: [
@@ -144,7 +142,9 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
   if (!(vipGroupCard instanceof HTMLElement)) {
     throw new Error('VIP group card was not rendered')
   }
-  expect(within(vipGroupCard).getByText(i18next.t('Normal'))).toBeInTheDocument()
+  expect(
+    within(vipGroupCard).getByText(i18next.t('No data'))
+  ).toBeInTheDocument()
 
   const defaultGroupCard = screen
     .getByText('default')
@@ -188,7 +188,7 @@ it('finds groups by their effective price', async () => {
   })
 })
 
-it('updates the active five-minute record color without adding a block', () => {
+it('keeps a single active record compact and updates its color in place', () => {
   const timestamp = Math.floor(Date.now() / 1_000 / 300) * 300
   const { container, rerender } = render(
     <ModelStatusHistory
@@ -207,6 +207,10 @@ it('updates the active five-minute record color without adding a block', () => {
   let bars = container.querySelectorAll('[data-slot="tooltip-trigger"]')
   expect(bars).toHaveLength(1)
   expect(bars.item(0)).toHaveClass('bg-emerald-500')
+  expect(bars.item(0)).toHaveClass('w-full')
+  expect(container.querySelectorAll('[data-slot="status-empty"]')).toHaveLength(
+    23
+  )
 
   rerender(
     <ModelStatusHistory
