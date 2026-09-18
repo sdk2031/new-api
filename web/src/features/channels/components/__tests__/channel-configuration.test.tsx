@@ -1201,6 +1201,11 @@ test('opening and reselecting an existing plugin preserves its saved configurati
   expect(await screen.findByDisplayValue('Existing channel')).toBeVisible()
   expect(screen.getByDisplayValue('https://saved.example')).toBeVisible()
   expect(screen.getByText('custom-model')).toBeVisible()
+  const binding = screen.getByText('Task plugin').closest('[role="status"]')
+  expect(binding).not.toBeNull()
+  expect(binding).toHaveTextContent('Task plugin')
+  expect(binding).toHaveTextContent('Video A')
+  expect(binding).toHaveTextContent('Bound')
   expect(screen.queryByLabelText('Task plugin *')).not.toBeInTheDocument()
   const providerControl = screen.getByRole('button', {
     name: 'Change provider',

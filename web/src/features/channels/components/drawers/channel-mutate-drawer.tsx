@@ -195,7 +195,10 @@ import {
   nextTaskPluginBaseUrl,
 } from '../../lib/task-plugin-base-url'
 import type { Channel } from '../../types'
-import { ChannelPluginExtensions } from '../channel-plugin-extensions'
+import {
+  ChannelPluginBinding,
+  ChannelPluginExtensions,
+} from '../channel-plugin-extensions'
 import { ChannelTypeLogo } from '../channel-type-badge'
 import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
@@ -2814,6 +2817,10 @@ export function ChannelMutateDrawer({
                           }
                         />
                       </>
+                    )}
+                  {currentType === CHANNEL_TYPE_TASK_PLUGIN &&
+                    boundTaskPlugin && (
+                      <ChannelPluginBinding plugin={boundTaskPlugin} />
                     )}
                   {modelMappingGuardrail.exposedTargetModels.length > 0 && (
                     <Alert className='border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-50'>

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
 import { resolveLocalizedText } from '@/lib/localized-text'
@@ -83,6 +84,26 @@ export function ChannelPluginExtensions(props: {
           </Button>
         )
       })}
+    </div>
+  )
+}
+
+export function ChannelPluginBinding(props: { plugin: TaskPluginOption }) {
+  const { t } = useTranslation()
+
+  return (
+    <div
+      role='status'
+      className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'
+    >
+      <span className='text-muted-foreground text-xs'>{t('Task plugin')}</span>
+      <Badge variant='secondary' className='max-w-full gap-1.5'>
+        <span aria-hidden='true' className='shrink-0'>
+          <PluginIcon plugin={props.plugin} size={14} />
+        </span>
+        <span className='max-w-40 truncate'>{props.plugin.name}</span>
+        <span className='text-muted-foreground'>{t('Bound')}</span>
+      </Badge>
     </div>
   )
 }

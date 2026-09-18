@@ -3,6 +3,7 @@ package controller
 import (
 	"testing"
 
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,4 +38,19 @@ func TestAggregateProviderPerformanceModelsUsesEqualModelWeightAndRealIntervals(
 	assert.Equal(t, int64(400), result.RecentIntervalSeries[1].AvgLatencyMs)
 	assert.Equal(t, 80.0, result.RecentIntervalSeries[1].SuccessRate)
 	assert.Nil(t, aggregateProviderPerformanceModels(nil))
+}
+
+func TestMergeProviderPerformanceModelsPreservesLocalMetricsAndAddsMissingModels(t *testing.T) {
+	local := []perfmetrics.ModelSummary{{ModelName: "local-model", SuccessRate: 99}}
+	result := mergeProviderPerformanceModels(local, []relaychannel.TaskPerformanceModel{
+		{ModelName: "local-model", SuccessRate: 50},
+		{ModelName: "fdai-model", AvgLatencyMs: 1200, SuccessRate: 95, AvgTps: 3},
+	})
+
+	require.Len(t, result, 2)
+	assert.Equal(t, "local-model", result[0].ModelName)
+	assert.Equal(t, 99.0, result[0].SuccessRate)
+	assert.Equal(t, "fdai-model", result[1].ModelName)
+	assert.Equal(t, 95.0, result[1].SuccessRate)
+	assert.True(t, result[1].ProviderFallback)
 }

@@ -41,7 +41,7 @@ var providerPerformanceCache = struct {
 	calls: make(map[string]*providerPerformanceCall),
 }
 
-func getProviderPerformanceFallback(parent context.Context, group string, hours int) *perfmetrics.ModelSummary {
+func getProviderPerformanceModels(parent context.Context, groups []string, hours int) []relaychannel.TaskPerformanceModel {
 	count, err := model.CountChannelsByType(constant.ChannelTypeTaskPlugin)
 	if err != nil {
 		logger.LogWarn(parent, "query task plugin channels for performance fallback: %v", err)
@@ -58,10 +58,17 @@ func getProviderPerformanceFallback(parent context.Context, group string, hours 
 
 	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
 	defer cancel()
+	allowedGroups := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		allowedGroups[group] = struct{}{}
+	}
 	selected := make([]relaychannel.TaskPerformanceModel, 0)
 	seen := make(map[string]struct{})
 	for _, channelSummary := range channels {
-		if channelSummary.Status != common.ChannelStatusEnabled || !slices.Contains(channelSummary.GetGroups(), group) {
+		if channelSummary.Status != common.ChannelStatusEnabled || !slices.ContainsFunc(channelSummary.GetGroups(), func(group string) bool {
+			_, ok := allowedGroups[group]
+			return ok
+		}) {
 			continue
 		}
 		channel, cacheErr := model.CacheGetChannel(channelSummary.Id)
@@ -110,7 +117,7 @@ func getProviderPerformanceFallback(parent context.Context, group string, hours 
 				continue
 			}
 		}
-		allowedModels := make(map[string]struct{}, len(channel.GetModels()))
+		localModelsByUpstream := make(map[string][]string, len(channel.GetModels()))
 		for _, localModel := range channel.GetModels() {
 			localModel = strings.TrimSpace(localModel)
 			if localModel == "" {
@@ -120,21 +127,54 @@ func getProviderPerformanceFallback(parent context.Context, group string, hours 
 			if upstreamModel == "" {
 				upstreamModel = localModel
 			}
-			allowedModels[upstreamModel] = struct{}{}
+			localModelsByUpstream[upstreamModel] = append(localModelsByUpstream[upstreamModel], localModel)
 		}
 		for _, metric := range models {
-			if _, ok := allowedModels[metric.ModelName]; !ok {
+			localModels := localModelsByUpstream[metric.ModelName]
+			if len(localModels) == 0 {
 				continue
 			}
-			deduplicationKey := pluginKey + "\x00" + baseURL + "\x00" + metric.ModelName
-			if _, duplicate := seen[deduplicationKey]; duplicate {
-				continue
+			for _, localModel := range localModels {
+				deduplicationKey := pluginKey + "\x00" + baseURL + "\x00" + localModel
+				if _, duplicate := seen[deduplicationKey]; duplicate {
+					continue
+				}
+				seen[deduplicationKey] = struct{}{}
+				localMetric := metric
+				localMetric.ModelName = localModel
+				selected = append(selected, localMetric)
 			}
-			seen[deduplicationKey] = struct{}{}
-			selected = append(selected, metric)
 		}
 	}
-	return aggregateProviderPerformanceModels(selected)
+	return selected
+}
+
+func mergeProviderPerformanceModels(local []perfmetrics.ModelSummary, provider []relaychannel.TaskPerformanceModel) []perfmetrics.ModelSummary {
+	seen := make(map[string]struct{}, len(local))
+	for _, summary := range local {
+		seen[summary.ModelName] = struct{}{}
+	}
+	byModel := make(map[string][]relaychannel.TaskPerformanceModel)
+	for _, metric := range provider {
+		if _, ok := seen[metric.ModelName]; ok {
+			continue
+		}
+		byModel[metric.ModelName] = append(byModel[metric.ModelName], metric)
+	}
+	names := make([]string, 0, len(byModel))
+	for name := range byModel {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		summary := aggregateProviderPerformanceModels(byModel[name])
+		if summary == nil {
+			continue
+		}
+		summary.ModelName = name
+		local = append(local, *summary)
+	}
+	return local
 }
 
 func fetchCachedProviderPerformanceMetrics(

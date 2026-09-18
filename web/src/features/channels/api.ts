@@ -72,6 +72,7 @@ export type TaskPluginOption = {
   hasIcon?: boolean
   baseUrl?: string
   models: string[]
+  modelScope?: 'channel'
   channelTypes?: number[] | null
 }
 

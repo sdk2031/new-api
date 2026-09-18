@@ -41,8 +41,10 @@ func GetPerfMetricsSummary(c *gin.Context) {
 		})
 		return
 	}
+	providerModels := getProviderPerformanceModels(c.Request.Context(), activeGroups, hours)
+	result.Models = mergeProviderPerformanceModels(result.Models, providerModels)
 	if requestedGroup != "" && result.Aggregate == nil {
-		result.Aggregate = getProviderPerformanceFallback(c.Request.Context(), requestedGroup, hours)
+		result.Aggregate = aggregateProviderPerformanceModels(providerModels)
 	}
 	result.Groups = groupInfo
 

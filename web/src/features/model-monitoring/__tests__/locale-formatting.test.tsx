@@ -166,6 +166,10 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
   expect(
     emptyHistory.querySelectorAll('[data-slot="status-empty"]')
   ).toHaveLength(24)
+  expect(emptyHistory.querySelector('[data-slot="status-empty"]')).toHaveClass(
+    'border',
+    'bg-transparent'
+  )
   expect(within(vipGroupCard).getAllByText('—')).toHaveLength(3)
 
   const providerGroupCard = screen
