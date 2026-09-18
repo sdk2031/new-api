@@ -271,3 +271,52 @@ it('keeps a single active record compact and updates its color in place', () => 
   expect(bars).toHaveLength(1)
   expect(bars.item(0)).toHaveClass('bg-red-500')
 })
+
+it('backfills only leading silence with older active intervals', () => {
+  const timestamp = Math.floor(Date.now() / 1_000 / 300) * 300
+  const { container } = render(
+    <ModelStatusHistory
+      currentInterval={timestamp}
+      series={[
+        {
+          ts: timestamp - 30 * 300,
+          success_rate: 100,
+          avg_latency_ms: 200,
+          avg_tps: 10,
+          request_count: 1,
+        },
+        {
+          ts: timestamp - 25 * 300,
+          success_rate: 80,
+          avg_latency_ms: 300,
+          avg_tps: 8,
+          request_count: 1,
+        },
+        {
+          ts: timestamp - 10 * 300,
+          success_rate: 50,
+          avg_latency_ms: 400,
+          avg_tps: 5,
+          request_count: 1,
+        },
+        {
+          ts: timestamp - 8 * 300,
+          success_rate: 100,
+          avg_latency_ms: 250,
+          avg_tps: 9,
+          request_count: 1,
+        },
+      ]}
+    />
+  )
+
+  const bars = container.querySelectorAll('[data-slot="tooltip-trigger"]')
+  expect(bars).toHaveLength(4)
+  expect(bars.item(0)).toHaveClass('bg-emerald-500')
+  expect(bars.item(1)).toHaveClass('bg-amber-500')
+  expect(bars.item(2)).toHaveClass('bg-red-500')
+  expect(bars.item(3)).toHaveClass('bg-emerald-500')
+  expect(container.querySelectorAll('[data-slot="status-empty"]')).toHaveLength(
+    20
+  )
+})

@@ -63,12 +63,35 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
       const interval = point.ts - (point.ts % MONITORING_INTERVAL_SECONDS)
       metricsByInterval.set(interval, point)
     }
-    return Array.from({ length: MONITORING_SLOT_COUNT }, (_, index) => {
-      const ts =
-        currentInterval -
-        (MONITORING_SLOT_COUNT - 1 - index) * MONITORING_INTERVAL_SECONDS
-      return { ts, metrics: metricsByInterval.get(ts) }
-    })
+    const windowPoints = Array.from(
+      { length: MONITORING_SLOT_COUNT },
+      (_, index) => {
+        const ts =
+          currentInterval -
+          (MONITORING_SLOT_COUNT - 1 - index) * MONITORING_INTERVAL_SECONDS
+        return { ts, metrics: metricsByInterval.get(ts) }
+      }
+    )
+    const firstActiveIndex = windowPoints.findIndex((point) => point.metrics)
+    if (firstActiveIndex === 0) return windowPoints
+
+    const leadingSlotCount =
+      firstActiveIndex === -1 ? MONITORING_SLOT_COUNT : firstActiveIndex
+    const windowStart = windowPoints[0].ts
+    const historicalPoints = [...metricsByInterval.entries()]
+      .filter(([ts]) => ts < windowStart)
+      .sort(([left], [right]) => left - right)
+      .slice(-leadingSlotCount)
+      .map(([ts, metrics]) => ({ ts, metrics }))
+    if (historicalPoints.length === 0) return windowPoints
+
+    const emptyLeadingSlots = windowPoints.slice(
+      0,
+      leadingSlotCount - historicalPoints.length
+    )
+    const activeWindow =
+      firstActiveIndex === -1 ? [] : windowPoints.slice(firstActiveIndex)
+    return [...emptyLeadingSlots, ...historicalPoints, ...activeWindow]
   }, [currentInterval, series])
   const timeFormatter = useMemo(
     () =>
