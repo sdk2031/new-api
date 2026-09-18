@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"io"
 	"net/http"
 
@@ -115,6 +116,29 @@ type TaskContentRequest struct {
 
 type TaskContentRequestProvider interface {
 	BuildContentRequest(task *model.Task, artifactKey string, clientRequest TaskArtifactClientRequest) (*TaskContentRequest, error)
+}
+
+type TaskPerformanceInterval struct {
+	Ts           int64   `json:"ts"`
+	AvgLatencyMs int64   `json:"avgLatencyMs"`
+	SuccessRate  float64 `json:"successRate"`
+	AvgTps       float64 `json:"avgTps"`
+	RequestCount int64   `json:"requestCount"`
+}
+
+type TaskPerformanceModel struct {
+	ModelName       string                    `json:"modelName"`
+	AvgLatencyMs    int64                     `json:"avgLatencyMs"`
+	SuccessRate     float64                   `json:"successRate"`
+	AvgTps          float64                   `json:"avgTps"`
+	RecentIntervals []TaskPerformanceInterval `json:"recentIntervals"`
+}
+
+// TaskPerformanceProvider is an optional task-plugin capability for importing
+// provider-observed health when this gateway has no local traffic samples.
+type TaskPerformanceProvider interface {
+	SupportsPerformanceMetrics() bool
+	FetchPerformanceMetrics(ctx context.Context, baseURL, key, proxy string, hours int) ([]TaskPerformanceModel, error)
 }
 
 type TaskUsageFactsProvider interface {

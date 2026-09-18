@@ -22,15 +22,16 @@ func GetPerfMetricsSummary(c *gin.Context) {
 
 	groupInfo, visibleGroups := getVisiblePerfMetricGroups(c)
 	activeGroups := lo.Keys(visibleGroups)
-	if group := c.Query("group"); group != "" {
-		if _, ok := visibleGroups[group]; !ok {
+	requestedGroup := c.Query("group")
+	if requestedGroup != "" {
+		if _, ok := visibleGroups[requestedGroup]; !ok {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
 				"message": "invalid group",
 			})
 			return
 		}
-		activeGroups = []string{group}
+		activeGroups = []string{requestedGroup}
 	}
 	result, err := perfmetrics.QuerySummaryAll(hours, activeGroups)
 	if err != nil {
@@ -39,6 +40,9 @@ func GetPerfMetricsSummary(c *gin.Context) {
 			"message": err.Error(),
 		})
 		return
+	}
+	if requestedGroup != "" && result.Aggregate == nil {
+		result.Aggregate = getProviderPerformanceFallback(c.Request.Context(), requestedGroup, hours)
 	}
 	result.Groups = groupInfo
 

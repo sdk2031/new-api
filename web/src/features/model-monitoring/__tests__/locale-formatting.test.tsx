@@ -48,6 +48,11 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
             ratio: 0.3,
             sort_order: 20,
           },
+          {
+            group: 'provider',
+            ratio: 0.25,
+            sort_order: 15,
+          },
         ],
         metrics: [
           {
@@ -70,6 +75,16 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
                   request_count: 12,
                 })
               ),
+            },
+          },
+          {
+            group: 'provider',
+            perf: {
+              model_name: '',
+              avg_latency_ms: 1200,
+              success_rate: 95,
+              avg_tps: 0,
+              provider_fallback: true,
             },
           },
         ],
@@ -101,7 +116,7 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
     [...document.querySelectorAll('[data-slot="card-title"]')].map(
       (element) => element.textContent
     )
-  ).toEqual(['vip', 'default'])
+  ).toEqual(['vip', 'provider', 'default'])
   expect(screen.getByText('¥2 / USD')).toBeInTheDocument()
   expect(screen.queryByText('1,000')).not.toBeInTheDocument()
   expect(screen.queryByText('0.2x')).not.toBeInTheDocument()
@@ -152,6 +167,17 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
     emptyHistory.querySelectorAll('[data-slot="status-empty"]')
   ).toHaveLength(24)
   expect(within(vipGroupCard).getAllByText('—')).toHaveLength(3)
+
+  const providerGroupCard = screen
+    .getByText('provider')
+    .closest('[data-slot="card"]')
+  if (!(providerGroupCard instanceof HTMLElement)) {
+    throw new Error('Provider group card was not rendered')
+  }
+  expect(
+    within(providerGroupCard).getByText(i18next.t('Normal'))
+  ).toBeInTheDocument()
+  expect(within(providerGroupCard).getByText('95.00%')).toBeInTheDocument()
 
   const defaultGroupCard = screen
     .getByText('default')

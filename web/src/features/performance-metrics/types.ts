@@ -61,6 +61,7 @@ export type PerfModelSummary = {
   recent_success_series?: SuccessRatePoint[]
   recent_interval_series?: PerformanceIntervalPoint[]
   request_count?: number
+  provider_fallback?: boolean
 }
 
 export type PerfGroupSummaryInfo = {

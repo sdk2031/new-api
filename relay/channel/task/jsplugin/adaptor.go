@@ -78,6 +78,12 @@ var taskArtifactKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,1
 
 const maxTaskArtifacts = 64
 
+const (
+	maxTaskPerformanceModels    = 10_000
+	maxTaskPerformanceIntervals = 30 * 24 * 12
+	maxTaskPerformanceBodyBytes = 8 << 20
+)
+
 // maxTaskPluginPersistedJSONBytes is the shared ceiling for taskData and plugin state.
 const maxTaskPluginPersistedJSONBytes = 1 << 20
 
@@ -613,6 +619,10 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, task *model.Task, proxy str
 }
 
 func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, value any) (*http.Response, error) {
+	return a.doFetchDescriptorContext(context.Background(), baseURL, proxy, value)
+}
+
+func (a *TaskAdaptor) doFetchDescriptorContext(ctx context.Context, baseURL, proxy string, value any) (*http.Response, error) {
 	var descriptor requestDescriptor
 	if err := convert(value, &descriptor); err != nil {
 		return nil, err
@@ -636,7 +646,7 @@ func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, value any) (*http
 	if method == "" {
 		method = http.MethodGet
 	}
-	req, err := http.NewRequest(method, descriptor.URL, requestBody)
+	req, err := http.NewRequestWithContext(ctx, method, descriptor.URL, requestBody)
 	if err != nil {
 		return nil, err
 	}
@@ -668,6 +678,88 @@ func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, value any) (*http
 		time.Since(started).Milliseconds(),
 	)
 	return resp, nil
+}
+
+func (a *TaskAdaptor) SupportsPerformanceMetrics() bool {
+	return a.hasHook(context.Background(), "buildPerformanceRequest")
+}
+
+func (a *TaskAdaptor) FetchPerformanceMetrics(ctx context.Context, baseURL, key, proxy string, hours int) ([]channel.TaskPerformanceModel, error) {
+	if !a.SupportsPerformanceMetrics() {
+		return nil, fmt.Errorf("plugin performance metrics are unavailable")
+	}
+	if hours <= 0 {
+		hours = 24
+	}
+	if hours > 24*30 {
+		hours = 24 * 30
+	}
+	requestContext := map[string]any{
+		"baseUrl": baseURL,
+		"hours":   hours,
+	}
+	auth, err := resolveAuth(a.plugin.Meta.Auth, key, proxy)
+	if err != nil {
+		return nil, err
+	}
+	requestContext["auth"] = auth
+	requestContext["authHeader"] = auth["authHeader"]
+	if a.plugin.Meta.Auth.Type == "" || a.plugin.Meta.Auth.Type == "none" || a.plugin.Meta.Auth.Type == "api_key" {
+		requestContext["apiKey"] = key
+	}
+	descriptor, err := a.plugin.Engine.Call(ctx, "buildPerformanceRequest", requestContext)
+	if err != nil {
+		return nil, fmt.Errorf("plugin performance request hook failed")
+	}
+	resp, err := a.doFetchDescriptorContext(ctx, baseURL, proxy, descriptor)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTaskPerformanceBodyBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read plugin performance response: %w", err)
+	}
+	if len(body) > maxTaskPerformanceBodyBytes {
+		return nil, fmt.Errorf("plugin performance response exceeds %d bytes", maxTaskPerformanceBodyBytes)
+	}
+	input := any(string(body))
+	var decoded any
+	if common.Unmarshal(body, &decoded) == nil {
+		input = decoded
+	}
+	value, err := a.plugin.Engine.Call(ctx, "parsePerformanceResponse", requestContext, input, hookHTTPResponse(resp))
+	if err != nil {
+		return nil, fmt.Errorf("plugin performance response hook failed")
+	}
+	var models []channel.TaskPerformanceModel
+	if err = convert(value, &models); err != nil {
+		return nil, fmt.Errorf("plugin returned invalid performance metrics")
+	}
+	if len(models) > maxTaskPerformanceModels {
+		return nil, fmt.Errorf("plugin returned too many performance models")
+	}
+	for i := range models {
+		item := &models[i]
+		item.ModelName = strings.TrimSpace(item.ModelName)
+		if item.ModelName == "" || len(item.ModelName) > 256 || item.AvgLatencyMs < 0 ||
+			math.IsNaN(item.SuccessRate) || math.IsInf(item.SuccessRate, 0) || item.SuccessRate < 0 || item.SuccessRate > 100 ||
+			math.IsNaN(item.AvgTps) || math.IsInf(item.AvgTps, 0) || item.AvgTps < 0 {
+			return nil, fmt.Errorf("plugin returned invalid performance model")
+		}
+		if len(item.RecentIntervals) > maxTaskPerformanceIntervals {
+			return nil, fmt.Errorf("plugin returned too many performance intervals")
+		}
+		for j := range item.RecentIntervals {
+			point := &item.RecentIntervals[j]
+			if point.Ts <= 0 || point.AvgLatencyMs < 0 || point.RequestCount < 0 ||
+				math.IsNaN(point.SuccessRate) || math.IsInf(point.SuccessRate, 0) || point.SuccessRate < 0 || point.SuccessRate > 100 ||
+				math.IsNaN(point.AvgTps) || math.IsInf(point.AvgTps, 0) || point.AvgTps < 0 {
+				return nil, fmt.Errorf("plugin returned invalid performance interval")
+			}
+		}
+	}
+	return models, nil
 }
 
 func (a *TaskAdaptor) ParseBatchResult(tasks []*model.Task, resp *http.Response, body []byte) (map[string]*service.BatchTaskResult, error) {
@@ -1717,6 +1809,7 @@ var _ channel.TaskAdaptor = (*TaskAdaptor)(nil)
 var _ channel.OpenAIVideoConverter = (*TaskAdaptor)(nil)
 var _ channel.TaskArtifactProvider = (*TaskAdaptor)(nil)
 var _ channel.TaskContentRequestProvider = (*TaskAdaptor)(nil)
+var _ channel.TaskPerformanceProvider = (*TaskAdaptor)(nil)
 var _ channel.TaskUsageFactsProvider = (*TaskAdaptor)(nil)
 var _ channel.TaskValidatedBillingProvider = (*TaskAdaptor)(nil)
 var _ channel.TaskValidatedUsageFactsProvider = (*TaskAdaptor)(nil)

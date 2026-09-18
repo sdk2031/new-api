@@ -361,12 +361,14 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 				rewriteTo = target.Alias
 			}
 		}
-		binding, found := generation.LookupEndpoint(c.Request.Method, c.Request.URL.Path, lookupModel)
-		if !found || binding.Plugin == nil {
+		candidates := generation.LookupEndpointCandidates(c.Request.Method, c.Request.URL.Path, lookupModel)
+		candidates = availableTaskPluginEndpointCandidates(c, candidates, lookupModel)
+		if len(candidates) == 0 || candidates[0].Plugin == nil {
 			c.Set(contextKeyTaskPluginEndpointModel, *modelRequest)
 			c.Next()
 			return
 		}
+		binding := candidates[0]
 		if rewriteTo != "" {
 			if rewriteErr := rewriteTaskPluginJSONModel(c, rewriteTo); rewriteErr != nil {
 				abortWithOpenAiMessage(c, http.StatusBadRequest, "Invalid task protocol request")
@@ -375,10 +377,6 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 		}
 		modelRequest.Model = pinModel
 		c.Set(contextKeyTaskPluginEndpointModel, *modelRequest)
-		candidates := generation.LookupEndpointCandidates(c.Request.Method, c.Request.URL.Path, lookupModel)
-		if len(candidates) == 0 {
-			candidates = []pluginruntime.ProtocolBinding{binding}
-		}
 		if definition, known := pluginruntime.HostProtocol(binding.Protocol); known && len(definition.DefinedModes()) > 0 {
 			stream, background := jsonBodyBoolFlags(c)
 			required := make([]string, 0, 2)
@@ -440,6 +438,31 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 		)
 		c.Next()
 	}
+}
+
+func availableTaskPluginEndpointCandidates(c *gin.Context, candidates []pluginruntime.ProtocolBinding, modelName string) []pluginruntime.ProtocolBinding {
+	available := make([]pluginruntime.ProtocolBinding, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.Plugin == nil || candidate.Plugin.Meta.ModelScope != "channel" {
+			available = append(available, candidate)
+			continue
+		}
+
+		groups := []string{common.GetContextKeyString(c, constant.ContextKeyUsingGroup)}
+		if groups[0] == "auto" {
+			userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+			groups = service.GetRequestAutoGroups(c, userGroup)
+		}
+		filter := dto.ChannelFilter{Kind: dto.FilterTaskPluginIdentity, TaskPluginKey: candidate.Plugin.Meta.Key}
+		for _, group := range groups {
+			channel, err := model.GetRandomSatisfiedChannel(group, modelName, 0, []dto.ChannelFilter{filter})
+			if err == nil && channel != nil {
+				available = append(available, candidate)
+				break
+			}
+		}
+	}
+	return available
 }
 
 func jsonBodyBoolFlags(c *gin.Context) (stream, background bool) {
@@ -640,7 +663,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 			} else if model, _ := result["model"].(string); strings.TrimSpace(model) == "" {
 				reason = "invalid_model"
 				detail = "decoded request is missing a model"
-			} else if model != pinned.Model || (pinned.MappedModel == "" && !slices.Contains(candidate.Plugin.Meta.Models, model)) {
+			} else if model != pinned.Model || (pinned.MappedModel == "" && !candidate.Plugin.Meta.AcceptsModel(model)) {
 				reason = "resolved_model_not_owned"
 				detail = fmt.Sprintf("model %q is not served by this plugin", model)
 			}
@@ -1420,7 +1443,7 @@ func PrepareTaskPluginSubmit() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "model is required", "type": "invalid_request_error"}})
 			return
 		}
-		exactOwned := slices.Contains(plugin.Meta.Models, modelName)
+		exactOwned := plugin.Meta.AcceptsModel(modelName)
 		exactAlias := false
 		if target, resolved := model.ResolveTaskModelAlias(generation, modelName); resolved && target.Alias == modelName && target.PluginKey == plugin.Meta.Key {
 			exactAlias = true

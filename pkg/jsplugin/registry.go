@@ -98,6 +98,7 @@ type Meta struct {
 	BaseURL              string                      `json:"baseUrl,omitempty"`
 	ChannelTypes         []int                       `json:"channelTypes,omitempty"`
 	Models               []string                    `json:"models"`
+	ModelScope           string                      `json:"modelScope,omitempty"`
 	FetchMode            string                      `json:"fetchMode"`
 	AllowedHosts         []string                    `json:"allowedHosts"`
 	Routes               []Route                     `json:"routes"`
@@ -106,6 +107,12 @@ type Meta struct {
 	UsageExamples        []UsageExample              `json:"usageExamples,omitempty"`
 	UsageProfiles        []UsageProfile              `json:"usageProfiles,omitempty"`
 	Auth                 AuthMeta                    `json:"auth"`
+}
+
+// AcceptsModel reports whether the plugin may decode model. Channel-scoped
+// plugins defer the concrete model allowlist to the selected channel.
+func (m Meta) AcceptsModel(model string) bool {
+	return strings.TrimSpace(model) != "" && (m.ModelScope == "channel" || slices.Contains(m.Models, model))
 }
 
 // UsageProfile replaces the plugin's default usage metadata for its models.
@@ -336,6 +343,27 @@ func CompilePlugin(source string, options Options) (*LoadedPlugin, error) {
 	}
 	if artifactHooks["listArtifacts"] != artifactHooks["buildContentRequest"] {
 		return nil, fmt.Errorf("plugin %s must export listArtifacts and buildContentRequest together", meta.Key)
+	}
+	performanceHooks := make(map[string]bool, 2)
+	for _, hook := range []string{"buildPerformanceRequest", "parsePerformanceResponse"} {
+		exported, exportErr := engine.HasExport(context.Background(), hook)
+		if exportErr != nil {
+			return nil, exportErr
+		}
+		if !exported {
+			continue
+		}
+		callable, callableErr := engine.HasCallablePath(context.Background(), hook)
+		if callableErr != nil {
+			return nil, callableErr
+		}
+		if !callable {
+			return nil, fmt.Errorf("plugin %s export %q is not a function", meta.Key, hook)
+		}
+		performanceHooks[hook] = true
+	}
+	if performanceHooks["buildPerformanceRequest"] != performanceHooks["parsePerformanceResponse"] {
+		return nil, fmt.Errorf("plugin %s must export buildPerformanceRequest and parsePerformanceResponse together", meta.Key)
 	}
 	for _, route := range meta.Routes {
 		for kind, member := range map[string]string{"decode": route.Decode, "render": route.Render} {
@@ -975,7 +1003,7 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
+		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "modelScope", "fetchMode", "allowedHosts", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
 		default:
 			return Meta{}, &UnknownMetaFieldError{Field: field}
 		}
@@ -1065,6 +1093,9 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	meta.Models, err = strictStringSlice(object, "models")
 	if err != nil {
+		return Meta{}, err
+	}
+	if meta.ModelScope, err = stringMetaField(object, "modelScope"); err != nil {
 		return Meta{}, err
 	}
 	meta.AllowedHosts, err = strictStringSlice(object, "allowedHosts")
@@ -1248,6 +1279,9 @@ func normalizeV1Meta(meta *Meta) error {
 	if len(meta.Models) == 0 {
 		return fmt.Errorf("plugin meta models must contain at least one model")
 	}
+	if meta.ModelScope != "" && meta.ModelScope != "channel" {
+		return fmt.Errorf("plugin meta modelScope must be channel when present")
+	}
 	seenChannelTypes := make(map[int]struct{}, len(meta.ChannelTypes))
 	for _, channelType := range meta.ChannelTypes {
 		if channelType <= 0 {
@@ -1260,6 +1294,9 @@ func normalizeV1Meta(meta *Meta) error {
 			return fmt.Errorf("plugin meta channelTypes must be unique")
 		}
 		seenChannelTypes[channelType] = struct{}{}
+	}
+	if meta.ModelScope == "channel" && len(meta.ChannelTypes) > 0 {
+		return fmt.Errorf("plugin meta modelScope channel cannot be combined with channelTypes")
 	}
 	models := make(map[string]struct{}, len(meta.Models))
 	seenFold := make(map[string]struct{}, len(meta.Models))

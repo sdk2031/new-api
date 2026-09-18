@@ -68,6 +68,7 @@ type ModelSummary struct {
 	RecentSuccessSeries  []SuccessRatePoint         `json:"recent_success_series,omitempty"`
 	RecentIntervalSeries []PerformanceIntervalPoint `json:"recent_interval_series,omitempty"`
 	RequestCount         int64                      `json:"-"`
+	ProviderFallback     bool                       `json:"provider_fallback,omitempty"`
 }
 
 type GroupSummaryInfo struct {

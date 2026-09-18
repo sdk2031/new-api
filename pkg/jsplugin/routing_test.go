@@ -78,6 +78,27 @@ func TestRegistryIndexesSharedEndpointCandidatesForDistinctLegacyProviders(t *te
 	assert.Empty(t, registry.RoutingErrors())
 }
 
+func TestChannelScopedProtocolModelsRemainOptIn(t *testing.T) {
+	registry := NewRegistry()
+	static := mustCompileRoutingPlugin(t, "static-provider", 0, `["static-model"]`,
+		`protocols: ["openai_video"],`, `export const protocols = {openai_video: {decodeRequest: function(ctx) { return ctx; }, render: function(ctx, task) { return task; }}};`)
+	channelScoped := mustCompileRoutingPlugin(t, "channel-provider", 0, `["default-model"]`,
+		`modelScope: "channel", protocols: ["openai_video"],`, `export const protocols = {openai_video: {decodeRequest: function(ctx) { return ctx; }, render: function(ctx, task) { return task; }}};`)
+	require.NoError(t, registry.ReplaceOverrides([]*LoadedPlugin{static, channelScoped}))
+
+	candidates := registry.Generation().LookupEndpointCandidates("POST", "/v1/videos", "channel-model")
+	require.Len(t, candidates, 1)
+	assert.Same(t, channelScoped, candidates[0].Plugin)
+	assert.Equal(t, "channel-model", candidates[0].Model)
+	assert.True(t, channelScoped.Meta.AcceptsModel("channel-model"))
+	assert.False(t, static.Meta.AcceptsModel("channel-model"))
+
+	candidates = registry.Generation().LookupEndpointCandidates("POST", "/v1/videos", "static-model")
+	require.Len(t, candidates, 2)
+	assert.Equal(t, "channel-provider", candidates[0].Plugin.Meta.Key)
+	assert.Equal(t, "static-provider", candidates[1].Plugin.Meta.Key)
+}
+
 func TestSupportsRegisteredHostProtocols(t *testing.T) {
 	assert.True(t, SupportsHostProtocol("openai_responses"))
 	assert.True(t, SupportsHostProtocol("openai_video"))

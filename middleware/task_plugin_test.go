@@ -1585,6 +1585,70 @@ func TestPinTaskPluginEndpointMovesParserToSurvivingSharedCandidate(t *testing.T
 	})
 }
 
+func TestChannelScopedEndpointCandidatesRequireMatchingPluginChannel(t *testing.T) {
+	previousDB := model.DB
+	previousType := common.MainDatabaseType()
+	previousMemoryCache := common.MemoryCacheEnabled
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	model.DB = database
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.SetMainDatabaseType(previousType)
+		common.MemoryCacheEnabled = previousMemoryCache
+	})
+
+	registry := jsplugin.NewRegistry()
+	for _, key := range []string{"fdai-video", "other-video"} {
+		source := fmt.Sprintf(`
+export const meta = {
+  apiVersion: 1, key: %q, name: %q, version: "1.0.0", author: {name: "Test"},
+  models: ["default-model"], modelScope: "channel", fetchMode: "per_task",
+  protocols: ["openai_video"],
+};
+export function buildSubmitRequest() { return {url: "https://example.com"}; }
+export function parseSubmitResponse() { return {taskId: "one"}; }
+export function buildQueryRequest() { return {url: "https://example.com"}; }
+export function parseTaskResult() { return {status: "SUCCESS"}; }
+export function listArtifacts() { return []; }
+export function buildContentRequest() { throw new Error("artifact_not_found"); }
+export const protocols = {openai_video: {
+  decodeRequest: function(ctx) { return {kind: "submit", model: ctx.model}; },
+  render: function(_ctx, task) { return task; },
+}};
+`, key, key)
+		_, err = registry.Register(source, jsplugin.Options{})
+		require.NoError(t, err)
+	}
+
+	channel := model.Channel{
+		Type:   constant.ChannelTypeTaskPlugin,
+		Key:    "secret",
+		Status: common.ChannelStatusEnabled,
+		Name:   "FDAI",
+		Models: "upstream-video-model",
+		Group:  "default",
+	}
+	channel.SetSetting(dto.ChannelSettings{TaskPluginKey: "fdai-video"})
+	require.NoError(t, channel.Insert())
+
+	c, _ := gin.CreateTestContext(nil)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+	candidates := registry.Generation().LookupEndpointCandidates(http.MethodPost, "/v1/videos", "upstream-video-model")
+	require.Len(t, candidates, 2)
+
+	available := availableTaskPluginEndpointCandidates(c, candidates, "upstream-video-model")
+	require.Len(t, available, 1)
+	assert.Equal(t, "fdai-video", available[0].Plugin.Meta.Key)
+
+	defaultCandidates := registry.Generation().LookupEndpointCandidates(http.MethodPost, "/v1/videos", "default-model")
+	require.Len(t, defaultCandidates, 2)
+	assert.Empty(t, availableTaskPluginEndpointCandidates(c, defaultCandidates, "default-model"))
+}
+
 func compileTaskRoutePlugin(t *testing.T, source string) *jsplugin.LoadedPlugin {
 	t.Helper()
 	plugin, err := jsplugin.CompilePlugin(source, jsplugin.Options{})

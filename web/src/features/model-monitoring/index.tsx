@@ -106,6 +106,12 @@ function getMonitoringStatus(
   perf: PerfModelSummary | undefined,
   currentInterval: number
 ): MonitoringRow['status'] {
+  if (perf?.provider_fallback) {
+    if (!Number.isFinite(perf.success_rate)) return 'unknown'
+    if (perf.success_rate >= NORMAL_RATE_MIN) return 'normal'
+    if (perf.success_rate >= FLUCTUATING_RATE_MIN) return 'fluctuating'
+    return 'abnormal'
+  }
   if (currentInterval <= 0) return 'unknown'
   const windowStart =
     currentInterval - (MONITORING_SLOT_COUNT - 1) * MONITORING_INTERVAL_SECONDS

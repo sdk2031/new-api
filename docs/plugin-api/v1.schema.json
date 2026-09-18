@@ -11,7 +11,7 @@
     "apiVersion": {"const": 1}, "key": {"type": "string"}, "name": {"type": "string"}, "icon": {"type": "string", "maxLength": 128}, "description": {"$ref": "#/$defs/localizedText"}, "version": {"type": "string"},
     "author": {"type": "object", "required": ["name"], "additionalProperties": false, "properties": {"name": {"type": "string"}, "url": {"type": "string", "format": "uri"}}},
     "baseUrl": {"type": "string", "format": "uri", "pattern": "^https?://", "maxLength": 191},
-    "channelTypes": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}}, "models": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "channelTypes": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}}, "models": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "modelScope": {"enum": ["channel"]},
     "fetchMode": {"enum": ["per_task", "batch"]}, "allowedHosts": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
     "protocols": {"type": "array", "uniqueItems": true, "items": {"oneOf": [
       {"enum": ["openai_video"]},
@@ -22,7 +22,10 @@
     "requiredCapabilities": {"type": "array", "uniqueItems": true, "items": {"enum": ["json-clone@1", "submit-sse-delta@1"]}},
     "routes": {"type": "array", "items": {"$ref": "#/$defs/route"}}, "usageSchema": {"type": "object", "additionalProperties": {"$ref": "#/$defs/usageField"}}, "usageExamples": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["label", "facts"], "properties": {"label": {"type": "string"}, "facts": {"type": "object"}}}}, "usageProfiles": {"type": "array", "items": {"$ref": "#/$defs/usageProfile"}}, "auth": {}
   },
-  "allOf": [{"if": {"required": ["requiredCapabilities"], "properties": {"requiredCapabilities": {"contains": {"const": "submit-sse-delta@1"}}}}, "then": {"required": ["submitResponseTypes"], "properties": {"submitResponseTypes": {"contains": {"const": "sse"}}}}}],
+  "allOf": [
+    {"if": {"required": ["requiredCapabilities"], "properties": {"requiredCapabilities": {"contains": {"const": "submit-sse-delta@1"}}}}, "then": {"required": ["submitResponseTypes"], "properties": {"submitResponseTypes": {"contains": {"const": "sse"}}}}},
+    {"if": {"required": ["modelScope"]}, "then": {"not": {"required": ["channelTypes"]}}}
+  ],
   "$defs": {
     "jsonChange": {
       "type": "object", "additionalProperties": false, "required": ["op", "path", "value"],

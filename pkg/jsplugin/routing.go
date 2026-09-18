@@ -331,6 +331,7 @@ type RoutingGeneration struct {
 	byChannelType        map[int]*LoadedPlugin
 	routeIndex           map[string]RouteBinding
 	protocolIndex        map[string][]ProtocolBinding
+	channelProtocolIndex map[string][]ProtocolBinding
 	plugins              []*LoadedPlugin
 	routes               []RouteBinding
 	runtime              http.Handler
@@ -464,14 +465,7 @@ func (g *RoutingGeneration) LookupDeclaredRoute(method, path string) (RouteBindi
 }
 
 func (g *RoutingGeneration) LookupEndpoint(method, path, model string) (ProtocolBinding, bool) {
-	if g == nil {
-		return ProtocolBinding{}, false
-	}
-	normalizedMethod, err := normalizeRouteMethod(method)
-	if err != nil {
-		return ProtocolBinding{}, false
-	}
-	bindings := g.protocolIndex[endpointIndexKey(normalizedMethod, path, model)]
+	bindings := g.LookupEndpointCandidates(method, path, model)
 	if len(bindings) == 0 {
 		return ProtocolBinding{}, false
 	}
@@ -488,8 +482,24 @@ func (g *RoutingGeneration) LookupEndpointCandidates(method, path, model string)
 	if err != nil {
 		return nil
 	}
-	bindings := g.protocolIndex[endpointIndexKey(normalizedMethod, path, model)]
-	return append([]ProtocolBinding(nil), bindings...)
+	bindings := append([]ProtocolBinding(nil), g.protocolIndex[endpointIndexKey(normalizedMethod, path, model)]...)
+	seen := make(map[string]struct{}, len(bindings))
+	for _, binding := range bindings {
+		seen[binding.Plugin.Meta.Key+"\x00"+binding.Protocol] = struct{}{}
+	}
+	for _, binding := range g.channelProtocolIndex[channelEndpointIndexKey(normalizedMethod, path)] {
+		key := binding.Plugin.Meta.Key + "\x00" + binding.Protocol
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		binding.Model = model
+		bindings = append(bindings, binding)
+		seen[key] = struct{}{}
+	}
+	sort.SliceStable(bindings, func(i, j int) bool {
+		return bindings[i].Plugin.Meta.Key < bindings[j].Plugin.Meta.Key
+	})
+	return bindings
 }
 
 func (g *RoutingGeneration) Plugins() []*LoadedPlugin {
@@ -655,6 +665,10 @@ func routePathShape(routePath string) (string, error) {
 
 func endpointIndexKey(method, path, model string) string {
 	return method + "\x00" + path + "\x00" + model
+}
+
+func channelEndpointIndexKey(method, path string) string {
+	return method + "\x00" + path
 }
 
 func intersectingReservedNamespace(routePath string) (string, bool) {
@@ -878,6 +892,7 @@ func buildRoutingGenerationFromPlugins(effective map[string]*LoadedPlugin, numbe
 		byChannelType:        make(map[int]*LoadedPlugin),
 		routeIndex:           make(map[string]RouteBinding),
 		protocolIndex:        make(map[string][]ProtocolBinding),
+		channelProtocolIndex: make(map[string][]ProtocolBinding),
 		plugins:              make([]*LoadedPlugin, 0, len(effective)),
 	}
 	for _, key := range keys {
@@ -938,6 +953,13 @@ func buildRoutingGenerationFromPlugins(effective map[string]*LoadedPlugin, numbe
 					continue
 				}
 				for _, method := range operation.Methods {
+					if plugin.Meta.ModelScope == "channel" && len(claim.Models) == 0 {
+						indexKey := channelEndpointIndexKey(method, operation.Path)
+						generation.channelProtocolIndex[indexKey] = append(
+							generation.channelProtocolIndex[indexKey],
+							ProtocolBinding{Plugin: plugin, Protocol: claim.Name, Operation: operation},
+						)
+					}
 					for _, model := range boundModels {
 						indexKey := endpointIndexKey(method, operation.Path, model)
 						bindings := generation.protocolIndex[indexKey]

@@ -133,6 +133,33 @@ func TestRegistryRequiresArtifactHooksAsPair(t *testing.T) {
 	}
 }
 
+func TestRegistryRequiresPerformanceHooksAsPair(t *testing.T) {
+	for _, hook := range []string{"buildPerformanceRequest", "parsePerformanceResponse"} {
+		t.Run(hook, func(t *testing.T) {
+			source := routingTestPluginSource(
+				"performance-hook-pair",
+				0,
+				`["model"]`,
+				"",
+				"export function "+hook+"() { return []; }",
+			)
+			_, err := CompilePlugin(source, Options{})
+			require.ErrorContains(t, err, "must export buildPerformanceRequest and parsePerformanceResponse together")
+		})
+	}
+
+	source := routingTestPluginSource(
+		"performance-hook-pair",
+		0,
+		`["model"]`,
+		"",
+		`export function buildPerformanceRequest() { return {}; }
+export function parsePerformanceResponse() { return []; }`,
+	)
+	_, err := CompilePlugin(source, Options{})
+	require.NoError(t, err)
+}
+
 func TestRegistryRejectsRemovedNativeRoutingFields(t *testing.T) {
 	for _, field := range []string{"submitPaths", "actions"} {
 		t.Run(field, func(t *testing.T) {
@@ -964,6 +991,15 @@ func TestRegistryNormalizesBaseURL(t *testing.T) {
 			assert.Equal(t, test.want, loaded.Meta.BaseURL)
 		})
 	}
+}
+
+func TestRegistryValidatesModelScope(t *testing.T) {
+	plugin, err := CompilePlugin(routingTestPluginSource("channel-models", 0, `["default"]`, `modelScope: "channel",`, ""), Options{})
+	require.NoError(t, err)
+	assert.Equal(t, "channel", plugin.Meta.ModelScope)
+
+	_, err = CompilePlugin(routingTestPluginSource("invalid-model-scope", 0, `["default"]`, `modelScope: "global",`, ""), Options{})
+	require.ErrorContains(t, err, "modelScope must be channel")
 }
 
 func TestRegistryNormalizesAllowedHosts(t *testing.T) {

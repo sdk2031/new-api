@@ -57,6 +57,7 @@ export type TaskPluginMeta = {
   baseUrl?: string
   channelTypes?: number[] | null
   models: string[] | null
+  modelScope?: 'channel'
   fetchMode: string
   routes?: TaskPluginRoute[]
   protocols?: TaskPluginProtocolClaim[]
