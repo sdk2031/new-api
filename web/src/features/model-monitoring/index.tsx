@@ -71,7 +71,11 @@ import { toIntlLocale } from '@/i18n/languages'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
-import { ModelStatusHistory } from './model-status-history'
+import {
+  MONITORING_INTERVAL_SECONDS,
+  MONITORING_SLOT_COUNT,
+  ModelStatusHistory,
+} from './model-status-history'
 
 const PERFORMANCE_WINDOW_HOURS = 24
 const REFRESH_INTERVAL_MS = 30_000
@@ -99,16 +103,27 @@ type MonitoringRow = {
 }
 
 function getMonitoringStatus(
-  perf: PerfModelSummary | undefined
+  perf: PerfModelSummary | undefined,
+  currentInterval: number
 ): MonitoringRow['status'] {
+  if (currentInterval <= 0) return 'unknown'
+  const windowStart =
+    currentInterval - (MONITORING_SLOT_COUNT - 1) * MONITORING_INTERVAL_SECONDS
   const latestPoint = (perf?.recent_interval_series ?? []).reduce<
     PerformanceIntervalPoint | undefined
   >((latest, point) => {
-    if (!Number.isFinite(point.success_rate)) return latest
+    if (
+      !Number.isFinite(point.success_rate) ||
+      point.success_rate < 0 ||
+      point.success_rate > 100
+    ) {
+      return latest
+    }
+    if (point.ts < windowStart || point.ts > currentInterval) return latest
     if (!latest || point.ts > latest.ts) return point
     return latest
   }, undefined)
-  const successRate = latestPoint?.success_rate ?? perf?.success_rate
+  const successRate = latestPoint?.success_rate
   if (successRate == null || !Number.isFinite(successRate)) return 'unknown'
   if (successRate >= NORMAL_RATE_MIN) return 'normal'
   if (successRate >= FLUCTUATING_RATE_MIN) return 'fluctuating'
@@ -163,6 +178,11 @@ export function ModelMonitoring() {
     return () => window.clearInterval(timer)
   }, [])
 
+  const currentMonitoringInterval =
+    Math.floor(
+      metricsQuery.dataUpdatedAt / 1_000 / MONITORING_INTERVAL_SECONDS
+    ) * MONITORING_INTERVAL_SECONDS
+
   const perfMap = useMemo(
     () =>
       new Map(
@@ -183,7 +203,7 @@ export function ModelMonitoring() {
           sortOrder: groupInfo.sort_order ?? 0,
           effectivePrice: groupInfo.ratio * priceRate,
           perf,
-          status: getMonitoringStatus(perf),
+          status: getMonitoringStatus(perf, currentMonitoringInterval),
         }
       })
       .sort((left, right) => {
@@ -191,7 +211,7 @@ export function ModelMonitoring() {
         if (orderDifference !== 0) return orderDifference
         return left.group.localeCompare(right.group)
       })
-  }, [metricsQuery.data?.groups, perfMap, priceRate])
+  }, [currentMonitoringInterval, metricsQuery.data?.groups, perfMap, priceRate])
 
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
@@ -207,7 +227,7 @@ export function ModelMonitoring() {
   }, [deferredSearch, priceFormatter, rows, statusFilter])
 
   const summary = useMemo(() => {
-    const measured = rows.filter((row) => row.perf)
+    const measured = rows.filter((row) => row.status !== 'unknown' && row.perf)
     const average =
       measured.length > 0
         ? measured.reduce(
@@ -363,6 +383,7 @@ export function ModelMonitoring() {
           <MonitoringResults
             loading={metricsQuery.isLoading}
             rows={filteredRows}
+            currentInterval={currentMonitoringInterval}
           />
         </div>
       </SectionPageLayout.Content>
@@ -370,11 +391,17 @@ export function ModelMonitoring() {
   )
 }
 
-function MonitoringCard(props: { row: MonitoringRow }) {
+function MonitoringCard(props: {
+  row: MonitoringRow
+  currentInterval: number
+}) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const perf = props.row.perf
-  const successRate = perf?.success_rate ?? Number.NaN
+  const hasMonitoringData = props.row.status !== 'unknown'
+  const successRate = hasMonitoringData
+    ? (perf?.success_rate ?? Number.NaN)
+    : Number.NaN
   const effectivePrice = new Intl.NumberFormat(locale, {
     maximumFractionDigits: 6,
   }).format(props.row.effectivePrice)
@@ -405,9 +432,7 @@ function MonitoringCard(props: { row: MonitoringRow }) {
         </div>
         <CardAction>
           <Badge variant='outline' className='gap-1.5'>
-            <span
-              className={cn('size-1.5 rounded-full', statusDotClass)}
-            />
+            <span className={cn('size-1.5 rounded-full', statusDotClass)} />
             {statusLabel}
           </Badge>
         </CardAction>
@@ -436,7 +461,9 @@ function MonitoringCard(props: { row: MonitoringRow }) {
                 {t('Average latency')}
               </dt>
               <dd className='mt-1 font-mono font-semibold'>
-                {formatLatency(perf?.avg_latency_ms ?? 0)}
+                {formatLatency(
+                  hasMonitoringData ? (perf?.avg_latency_ms ?? 0) : 0
+                )}
               </dd>
             </div>
             <div>
@@ -444,7 +471,7 @@ function MonitoringCard(props: { row: MonitoringRow }) {
                 {t('Throughput')}
               </dt>
               <dd className='mt-1 font-mono font-semibold'>
-                {formatThroughput(perf?.avg_tps ?? 0)}
+                {formatThroughput(hasMonitoringData ? (perf?.avg_tps ?? 0) : 0)}
               </dd>
             </div>
           </dl>
@@ -452,6 +479,7 @@ function MonitoringCard(props: { row: MonitoringRow }) {
 
         <ModelStatusHistory
           series={perf?.recent_interval_series}
+          currentInterval={props.currentInterval}
           className='h-6 w-full gap-1'
           barClassName='w-full rounded-sm'
         />
@@ -460,7 +488,11 @@ function MonitoringCard(props: { row: MonitoringRow }) {
   )
 }
 
-function MonitoringResults(props: { loading: boolean; rows: MonitoringRow[] }) {
+function MonitoringResults(props: {
+  loading: boolean
+  rows: MonitoringRow[]
+  currentInterval: number
+}) {
   const { t } = useTranslation()
 
   if (props.loading) return <MonitoringSkeleton />
@@ -472,7 +504,11 @@ function MonitoringResults(props: { loading: boolean; rows: MonitoringRow[] }) {
         className='grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(18rem,1fr))]'
       >
         {props.rows.map((row) => (
-          <MonitoringCard key={row.group} row={row} />
+          <MonitoringCard
+            key={row.group}
+            row={row}
+            currentInterval={props.currentInterval}
+          />
         ))}
       </div>
     )

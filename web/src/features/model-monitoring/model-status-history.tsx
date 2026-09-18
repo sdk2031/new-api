@@ -36,9 +36,11 @@ import { cn } from '@/lib/utils'
 interface ModelStatusHistoryProps extends React.HTMLAttributes<HTMLDivElement> {
   series?: PerformanceIntervalPoint[]
   barClassName?: string
+  currentInterval: number
 }
 
-const MAX_STATUS_RECORDS = 24
+export const MONITORING_SLOT_COUNT = 24
+export const MONITORING_INTERVAL_SECONDS = 300
 const NORMAL_RATE_MIN = 90
 const FLUCTUATING_RATE_MIN = 70
 
@@ -47,19 +49,27 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
 ) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
-  const { series, barClassName, className, ...rest } = props
+  const { series, barClassName, currentInterval, className, ...rest } = props
   const statusPoints = useMemo(() => {
-    return [...(series ?? [])]
-      .filter(
-        (point) =>
-          Number.isFinite(point.success_rate) &&
-          point.success_rate >= 0 &&
-          point.success_rate <= 100
-      )
-      .sort((left, right) => left.ts - right.ts)
-      .slice(-MAX_STATUS_RECORDS)
-  }, [series])
-  const emptySlots = MAX_STATUS_RECORDS - statusPoints.length
+    const metricsByInterval = new Map<number, PerformanceIntervalPoint>()
+    for (const point of series ?? []) {
+      if (
+        !Number.isFinite(point.success_rate) ||
+        point.success_rate < 0 ||
+        point.success_rate > 100
+      ) {
+        continue
+      }
+      const interval = point.ts - (point.ts % MONITORING_INTERVAL_SECONDS)
+      metricsByInterval.set(interval, point)
+    }
+    return Array.from({ length: MONITORING_SLOT_COUNT }, (_, index) => {
+      const ts =
+        currentInterval -
+        (MONITORING_SLOT_COUNT - 1 - index) * MONITORING_INTERVAL_SECONDS
+      return { ts, metrics: metricsByInterval.get(ts) }
+    })
+  }, [currentInterval, series])
   const timeFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
@@ -75,28 +85,27 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
   return (
     <div
       role='img'
-      aria-label={t(
-        'Latest 24 performance records at five-minute intervals.'
-      )}
-      title={t(
-        'Latest 24 performance records at five-minute intervals.'
-      )}
+      aria-label={t('Performance in the latest 24 five-minute intervals.')}
+      title={t('Performance in the latest 24 five-minute intervals.')}
       className={cn(
         'grid h-3 w-24 grid-cols-[repeat(24,minmax(0,1fr))] items-center gap-px',
         className
       )}
       {...rest}
     >
-      {Array.from({ length: emptySlots }, (_, index) => (
-        <span
-          key={`empty-${index}`}
-          data-slot='status-empty'
-          aria-hidden='true'
-          className='h-full min-w-0'
-        />
-      ))}
       {statusPoints.map((point) => {
-        const rate = point.success_rate
+        if (!point.metrics) {
+          return (
+            <span
+              key={point.ts}
+              data-slot='status-empty'
+              aria-hidden='true'
+              className='h-full min-w-0'
+            />
+          )
+        }
+
+        const rate = point.metrics.success_rate
         let statusLabel = t('No data')
         if (rate >= NORMAL_RATE_MIN) statusLabel = t('Normal')
         else if (rate >= FLUCTUATING_RATE_MIN) {
@@ -109,7 +118,7 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
               render={
                 <span
                   className={cn(
-                    'h-full w-[3px] shrink-0 cursor-default rounded-xs transition-opacity hover:opacity-80',
+                    'h-full w-full cursor-default rounded-xs transition-opacity hover:opacity-80',
                     getSuccessRateDotClass(rate),
                     barClassName
                   )}
@@ -125,20 +134,18 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
                 <span>{t('Status')}:</span>
                 <span className='text-right'>{statusLabel}</span>
                 <span>{t('Availability')}:</span>
-                <span className='text-right font-mono'>
-                  {rate.toFixed(1)}%
-                </span>
+                <span className='text-right font-mono'>{rate.toFixed(1)}%</span>
                 <span>{t('Average latency')}:</span>
                 <span className='text-right font-mono'>
-                  {formatLatency(point.avg_latency_ms)}
+                  {formatLatency(point.metrics.avg_latency_ms)}
                 </span>
                 <span>{t('Throughput')}:</span>
                 <span className='text-right font-mono'>
-                  {formatThroughput(point.avg_tps)}
+                  {formatThroughput(point.metrics.avg_tps)}
                 </span>
                 <span>{t('Requests')}:</span>
                 <span className='text-right font-mono'>
-                  {point.request_count.toLocaleString(locale)}
+                  {point.metrics.request_count.toLocaleString(locale)}
                 </span>
               </div>
             </TooltipContent>

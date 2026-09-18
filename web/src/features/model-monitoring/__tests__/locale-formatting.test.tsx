@@ -74,7 +74,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
           },
         ],
       },
-      dataUpdatedAt: Date.UTC(2026, 0, 1),
+      dataUpdatedAt: Date.now(),
       isLoading: false,
       isFetching: false,
       refetch,
@@ -118,13 +118,15 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
   if (!(summary instanceof HTMLElement)) {
     throw new Error('Group monitoring summary was not rendered')
   }
-  const normalSummary = within(summary).getByText(i18next.t('Normal'))
-    .parentElement
+  const normalSummary = within(summary).getByText(
+    i18next.t('Normal')
+  ).parentElement
   const fluctuatingSummary = within(summary).getByText(
     i18next.t('Fluctuating')
   ).parentElement
-  const abnormalSummary = within(summary).getByText(i18next.t('Abnormal'))
-    .parentElement
+  const abnormalSummary = within(summary).getByText(
+    i18next.t('Abnormal')
+  ).parentElement
   expect(normalSummary?.lastElementChild).toHaveClass('text-emerald-500')
   expect(fluctuatingSummary?.lastElementChild).toHaveClass('text-amber-600')
   expect(abnormalSummary?.lastElementChild).toHaveClass('text-red-600')
@@ -136,15 +138,20 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
   )
   expect(searchSummaryRow).toContainElement(summary)
 
-  const vipGroupCard = screen
-    .getByText('vip')
-    .closest('[data-slot="card"]')
+  const vipGroupCard = screen.getByText('vip').closest('[data-slot="card"]')
   if (!(vipGroupCard instanceof HTMLElement)) {
     throw new Error('VIP group card was not rendered')
   }
   expect(
     within(vipGroupCard).getByText(i18next.t('No data'))
   ).toBeInTheDocument()
+  const emptyHistory = within(vipGroupCard).getByRole('img', {
+    name: i18next.t('Performance in the latest 24 five-minute intervals.'),
+  })
+  expect(
+    emptyHistory.querySelectorAll('[data-slot="status-empty"]')
+  ).toHaveLength(24)
+  expect(within(vipGroupCard).getAllByText('—')).toHaveLength(3)
 
   const defaultGroupCard = screen
     .getByText('default')
@@ -153,7 +160,7 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
     throw new Error('Default group card was not rendered')
   }
   const history = within(defaultGroupCard).getByRole('img', {
-    name: i18next.t('Latest 24 performance records at five-minute intervals.'),
+    name: i18next.t('Performance in the latest 24 five-minute intervals.'),
   })
   const bars = history.querySelectorAll('[data-slot="tooltip-trigger"]')
   expect(bars).toHaveLength(24)
@@ -192,6 +199,7 @@ it('keeps a single active record compact and updates its color in place', () => 
   const timestamp = Math.floor(Date.now() / 1_000 / 300) * 300
   const { container, rerender } = render(
     <ModelStatusHistory
+      currentInterval={timestamp}
       series={[
         {
           ts: timestamp,
@@ -214,6 +222,7 @@ it('keeps a single active record compact and updates its color in place', () => 
 
   rerender(
     <ModelStatusHistory
+      currentInterval={timestamp}
       series={[
         {
           ts: timestamp,
