@@ -517,10 +517,10 @@ describe('model cards', () => {
     expect(spans).toHaveLength(24)
     spans.forEach((slot, index) => {
       if (index === 18 || index === 23) {
-        expect(slot).not.toHaveClass('border', 'bg-transparent')
+        expect(slot).not.toHaveClass('border', 'bg-muted-foreground/20')
         return
       }
-      expect(slot).toHaveClass('border', 'bg-transparent')
+      expect(slot).toHaveClass('border', 'bg-muted-foreground/20')
     })
     vi.useRealTimers()
   })
@@ -552,7 +552,7 @@ describe('model cards', () => {
     ]
     expect(spans).toHaveLength(24)
     spans.forEach((slot) => {
-      expect(slot).toHaveClass('border', 'bg-transparent')
+      expect(slot).toHaveClass('border', 'bg-muted-foreground/20')
     })
     vi.useRealTimers()
   })
@@ -573,7 +573,7 @@ describe('model cards', () => {
     ]
     expect(spans).toHaveLength(24)
     spans.forEach((slot) => {
-      expect(slot).toHaveClass('border', 'bg-transparent')
+      expect(slot).toHaveClass('border', 'bg-muted-foreground/20')
     })
   })
 
@@ -605,10 +605,10 @@ describe('model cards', () => {
     expect(spans).toHaveLength(24)
     spans.forEach((slot, index) => {
       if (index === 18) {
-        expect(slot).not.toHaveClass('border', 'bg-transparent')
+        expect(slot).not.toHaveClass('border', 'bg-muted-foreground/20')
         return
       }
-      expect(slot).toHaveClass('border', 'bg-transparent')
+      expect(slot).toHaveClass('border', 'bg-muted-foreground/20')
     })
     vi.useRealTimers()
   })

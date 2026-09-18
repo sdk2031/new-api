@@ -119,7 +119,7 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
                       rate >= 0 &&
                       rate <= 100
                       ? getSuccessRateDotClass(rate)
-                      : 'border-border/60 border bg-transparent'
+                      : 'border-border/50 bg-muted-foreground/20 border'
                   )}
                 />
               )

@@ -168,7 +168,7 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
   ).toHaveLength(24)
   expect(emptyHistory.querySelector('[data-slot="status-empty"]')).toHaveClass(
     'border',
-    'bg-transparent'
+    'bg-muted-foreground/20'
   )
   expect(within(vipGroupCard).getAllByText('—')).toHaveLength(3)
 

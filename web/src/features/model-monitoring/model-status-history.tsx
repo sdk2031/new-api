@@ -99,7 +99,7 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
               key={point.ts}
               data-slot='status-empty'
               aria-hidden='true'
-              className='border-border/60 h-full min-w-0 rounded-[1px] border bg-transparent'
+              className='border-border/50 bg-muted-foreground/20 h-full min-w-0 rounded-[1px] border'
             />
           )
         }
