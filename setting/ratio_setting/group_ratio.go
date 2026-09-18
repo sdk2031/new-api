@@ -1,8 +1,10 @@
 package ratio_setting
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -17,6 +19,14 @@ var defaultGroupRatio = map[string]float64{
 
 var groupRatioMap = types.NewRWMap[string, float64]()
 
+var defaultGroupOrder = map[string]int{
+	"default": 0,
+	"vip":     0,
+	"svip":    0,
+}
+
+var groupOrderMap = types.NewRWMap[string, int]()
+
 var defaultGroupGroupRatio = map[string]map[string]float64{
 	"vip": {
 		"edit_this": 0.9,
@@ -29,6 +39,7 @@ var defaultGroupSpecialUsableGroup = map[string]map[string]string{}
 
 type GroupRatioSetting struct {
 	GroupRatio              *types.RWMap[string, float64]            `json:"group_ratio"`
+	GroupOrder              *types.RWMap[string, int]                `json:"group_order"`
 	GroupGroupRatio         *types.RWMap[string, map[string]float64] `json:"group_group_ratio"`
 	GroupSpecialUsableGroup *types.RWMap[string, map[string]string]  `json:"group_special_usable_group"`
 }
@@ -40,11 +51,13 @@ func init() {
 	groupSpecialUsableGroup.AddAll(defaultGroupSpecialUsableGroup)
 
 	groupRatioMap.AddAll(defaultGroupRatio)
+	groupOrderMap.AddAll(defaultGroupOrder)
 	groupGroupRatioMap.AddAll(defaultGroupGroupRatio)
 
 	groupRatioSetting = GroupRatioSetting{
 		GroupSpecialUsableGroup: groupSpecialUsableGroup,
 		GroupRatio:              groupRatioMap,
+		GroupOrder:              groupOrderMap,
 		GroupGroupRatio:         groupGroupRatioMap,
 	}
 
@@ -66,6 +79,26 @@ func GetGroupRatioCopy() map[string]float64 {
 func ContainsGroupRatio(name string) bool {
 	_, ok := groupRatioMap.Get(name)
 	return ok
+}
+
+func GetGroupOrder(name string) int {
+	order, _ := groupOrderMap.Get(name)
+	return order
+}
+
+func GetOrderedGroupNames() []string {
+	ratioMap := GetGroupRatioCopy()
+	names := make([]string, 0, len(ratioMap))
+	for name := range ratioMap {
+		names = append(names, name)
+	}
+	slices.SortFunc(names, func(a, b string) int {
+		if order := cmp.Compare(GetGroupOrder(b), GetGroupOrder(a)); order != 0 {
+			return order
+		}
+		return cmp.Compare(a, b)
+	})
+	return names
 }
 
 func GroupRatio2JSONString() string {

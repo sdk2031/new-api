@@ -5,7 +5,26 @@ import (
 
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestGetOrderedGroupNamesUsesDescendingOrderAndNameFallback(t *testing.T) {
+	originalRatios := groupRatioMap.ReadAll()
+	originalOrder := groupOrderMap.ReadAll()
+	t.Cleanup(func() {
+		groupRatioMap.Clear()
+		groupRatioMap.AddAll(originalRatios)
+		groupOrderMap.Clear()
+		groupOrderMap.AddAll(originalOrder)
+	})
+
+	groupRatioMap.Clear()
+	groupRatioMap.AddAll(map[string]float64{"beta": 1, "alpha": 1, "vip": 1})
+	groupOrderMap.Clear()
+	groupOrderMap.AddAll(map[string]int{"alpha": 10, "beta": 10, "vip": 20})
+
+	require.Equal(t, []string{"vip", "alpha", "beta"}, GetOrderedGroupNames())
+}
 
 func TestFormatMatchingModelNameDoesNotStripBase(t *testing.T) {
 	assert.Equal(t, "qwen3-max@thinking:on", FormatMatchingModelName("qwen3-max@thinking:on"))

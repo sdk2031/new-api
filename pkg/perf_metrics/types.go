@@ -52,19 +52,28 @@ type SuccessRatePoint struct {
 	SuccessRate float64 `json:"success_rate"`
 }
 
+type PerformanceIntervalPoint struct {
+	Ts           int64   `json:"ts"`
+	SuccessRate  float64 `json:"success_rate"`
+	AvgLatencyMs int64   `json:"avg_latency_ms"`
+	AvgTps       float64 `json:"avg_tps"`
+	RequestCount int64   `json:"request_count"`
+}
+
 type ModelSummary struct {
-	ModelName           string             `json:"model_name"`
-	AvgLatencyMs        int64              `json:"avg_latency_ms"`
-	SuccessRate         float64            `json:"success_rate"`
-	AvgTps              float64            `json:"avg_tps"`
-	RecentSuccessSeries []SuccessRatePoint `json:"recent_success_series,omitempty"`
-	RequestCount        int64              `json:"-"`
+	ModelName            string                     `json:"model_name"`
+	AvgLatencyMs         int64                      `json:"avg_latency_ms"`
+	SuccessRate          float64                    `json:"success_rate"`
+	AvgTps               float64                    `json:"avg_tps"`
+	RecentSuccessSeries  []SuccessRatePoint         `json:"recent_success_series,omitempty"`
+	RecentIntervalSeries []PerformanceIntervalPoint `json:"recent_interval_series,omitempty"`
+	RequestCount         int64                      `json:"-"`
 }
 
 type GroupSummaryInfo struct {
-	Group      string  `json:"group"`
-	Ratio      float64 `json:"ratio"`
-	ModelCount int     `json:"model_count"`
+	Group     string  `json:"group"`
+	Ratio     float64 `json:"ratio"`
+	SortOrder int     `json:"sort_order"`
 }
 
 type SummaryAllResult struct {

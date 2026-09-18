@@ -24,35 +24,40 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { getSuccessRateDotClass } from '@/features/performance-metrics/lib/format'
-import type { SuccessRatePoint } from '@/features/performance-metrics/types'
+import {
+  formatLatency,
+  formatThroughput,
+  getSuccessRateDotClass,
+} from '@/features/performance-metrics/lib/format'
+import type { PerformanceIntervalPoint } from '@/features/performance-metrics/types'
 import { toIntlLocale } from '@/i18n/languages'
 import { cn } from '@/lib/utils'
 
 interface ModelStatusHistoryProps extends React.HTMLAttributes<HTMLDivElement> {
-  series?: SuccessRatePoint[]
+  series?: PerformanceIntervalPoint[]
   barClassName?: string
 }
 
 const STATUS_SLOTS = Array.from({ length: 24 }, (_, slot) => slot)
-const HOUR_SECONDS = 3_600
-const ONLINE_RATE_MIN = 70
+const INTERVAL_SECONDS = 300
+const NORMAL_RATE_MIN = 90
+const FLUCTUATING_RATE_MIN = 70
 const CLOCK_POLL_INTERVAL_MS = 60_000
 const clockListeners = new Set<() => void>()
 let clockTimer: number | undefined
-let currentHourStart = getCurrentHourStart()
+let currentIntervalStart = getCurrentIntervalStart()
 
-function getCurrentHourStart() {
-  return Math.floor(Date.now() / 1_000 / HOUR_SECONDS) * HOUR_SECONDS
+function getCurrentIntervalStart() {
+  return Math.floor(Date.now() / 1_000 / INTERVAL_SECONDS) * INTERVAL_SECONDS
 }
 
-function subscribeToHourlyClock(listener: () => void) {
+function subscribeToIntervalClock(listener: () => void) {
   clockListeners.add(listener)
   if (clockListeners.size === 1) {
     clockTimer = window.setInterval(() => {
-      const nextHourStart = getCurrentHourStart()
-      if (nextHourStart === currentHourStart) return
-      currentHourStart = nextHourStart
+      const nextIntervalStart = getCurrentIntervalStart()
+      if (nextIntervalStart === currentIntervalStart) return
+      currentIntervalStart = nextIntervalStart
       clockListeners.forEach((notify) => notify())
     }, CLOCK_POLL_INTERVAL_MS)
   }
@@ -66,8 +71,8 @@ function subscribeToHourlyClock(listener: () => void) {
   }
 }
 
-function getHourlyClockSnapshot() {
-  return currentHourStart
+function getIntervalClockSnapshot() {
+  return currentIntervalStart
 }
 
 export const ModelStatusHistory = memo(function ModelStatusHistory(
@@ -76,21 +81,22 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const { series, barClassName, className, ...rest } = props
-  const currentHour = useSyncExternalStore(
-    subscribeToHourlyClock,
-    getHourlyClockSnapshot,
-    getHourlyClockSnapshot
+  const currentInterval = useSyncExternalStore(
+    subscribeToIntervalClock,
+    getIntervalClockSnapshot,
+    getIntervalClockSnapshot
   )
   const statusPoints = useMemo(() => {
-    const ratesByHour = new Map<number, number>()
+    const metricsByInterval = new Map<number, PerformanceIntervalPoint>()
     for (const point of series ?? []) {
-      ratesByHour.set(point.ts, point.success_rate)
+      const intervalTs = point.ts - (point.ts % INTERVAL_SECONDS)
+      metricsByInterval.set(intervalTs, point)
     }
     return STATUS_SLOTS.map((slot) => {
-      const ts = currentHour - (23 - slot) * HOUR_SECONDS
-      return { ts, rate: ratesByHour.get(ts) }
+      const ts = currentInterval - (23 - slot) * INTERVAL_SECONDS
+      return { ts, metrics: metricsByInterval.get(ts) }
     })
-  }, [currentHour, series])
+  }, [currentInterval, series])
   const timeFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
@@ -107,20 +113,25 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
     <div
       role='img'
       aria-label={t(
-        'Recent success-rate samples; gray bars indicate missing data.'
+        'Recent performance samples at five-minute intervals; gray bars indicate missing data.'
       )}
-      title={t('Recent success-rate samples; gray bars indicate missing data.')}
+      title={t(
+        'Recent performance samples at five-minute intervals; gray bars indicate missing data.'
+      )}
       className={cn('flex h-3 w-24 items-center gap-px', className)}
       {...rest}
     >
       {STATUS_SLOTS.map((slot) => {
         const point = statusPoints[slot]
-        const rate = point.rate
+        const rate = point.metrics?.success_rate
         const hasData =
           rate != null && Number.isFinite(rate) && rate >= 0 && rate <= 100
         let statusLabel = t('No data')
         if (hasData) {
-          statusLabel = rate >= ONLINE_RATE_MIN ? t('Online') : t('Offline')
+          if (rate >= NORMAL_RATE_MIN) statusLabel = t('Normal')
+          else if (rate >= FLUCTUATING_RATE_MIN) {
+            statusLabel = t('Fluctuating')
+          } else statusLabel = t('Abnormal')
         }
         const timeLabel = timeFormatter.format(point.ts * 1_000)
         return (
@@ -140,15 +151,31 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
             />
             <TooltipContent
               side='top'
-              className='grid min-w-36 gap-1.5 font-mono text-xs'
+              className='grid min-w-44 gap-1.5 text-xs'
             >
-              <div className='font-semibold'>{timeLabel}</div>
-              <div className='grid grid-cols-[auto_1fr] gap-x-2'>
+              <div className='font-mono font-semibold'>{timeLabel}</div>
+              <div className='grid grid-cols-[auto_1fr] gap-x-3 gap-y-1'>
                 <span>{t('Status')}:</span>
                 <span className='text-right'>{statusLabel}</span>
                 <span>{t('Availability')}:</span>
-                <span className='text-right'>
+                <span className='text-right font-mono'>
                   {hasData ? `${rate.toFixed(1)}%` : '—'}
+                </span>
+                <span>{t('Average latency')}:</span>
+                <span className='text-right font-mono'>
+                  {point.metrics
+                    ? formatLatency(point.metrics.avg_latency_ms)
+                    : '—'}
+                </span>
+                <span>{t('Throughput')}:</span>
+                <span className='text-right font-mono'>
+                  {point.metrics
+                    ? formatThroughput(point.metrics.avg_tps)
+                    : '—'}
+                </span>
+                <span>{t('Requests')}:</span>
+                <span className='text-right font-mono'>
+                  {point.metrics?.request_count.toLocaleString(locale) ?? '—'}
                 </span>
               </div>
             </TooltipContent>

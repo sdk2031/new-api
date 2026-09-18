@@ -2,11 +2,8 @@ package controller
 
 import (
 	"net/http"
-	"slices"
-	"sort"
 	"strconv"
 
-	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -108,31 +105,21 @@ func getVisiblePerfMetricGroups(c *gin.Context) ([]perfmetrics.GroupSummaryInfo,
 	userGroup := c.GetString("group")
 	usableGroups := service.GetUserUsableGroups(userGroup)
 	groupRatios := ratio_setting.GetGroupRatioCopy()
-	pricing := model.GetPricing()
 	groupInfo := make([]perfmetrics.GroupSummaryInfo, 0, len(groupRatios))
 	visibleGroups := make(map[string]struct{}, len(groupRatios))
 
-	for group := range groupRatios {
+	for _, group := range ratio_setting.GetOrderedGroupNames() {
 		if _, ok := usableGroups[group]; !ok {
 			continue
 		}
 
-		modelCount := 0
-		for _, item := range pricing {
-			if slices.Contains(item.EnableGroup, group) || slices.Contains(item.EnableGroup, "all") {
-				modelCount++
-			}
-		}
 		groupInfo = append(groupInfo, perfmetrics.GroupSummaryInfo{
-			Group:      group,
-			Ratio:      service.GetUserGroupRatio(userGroup, group),
-			ModelCount: modelCount,
+			Group:     group,
+			Ratio:     service.GetUserGroupRatio(userGroup, group),
+			SortOrder: ratio_setting.GetGroupOrder(group),
 		})
 		visibleGroups[group] = struct{}{}
 	}
 
-	sort.Slice(groupInfo, func(i, j int) bool {
-		return groupInfo[i].Group < groupInfo[j].Group
-	})
 	return groupInfo, visibleGroups
 }

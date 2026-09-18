@@ -45,19 +45,28 @@ export type PerformanceMetricsData = {
 
 export type SuccessRatePoint = { ts: number; success_rate: number }
 
+export type PerformanceIntervalPoint = {
+  ts: number
+  success_rate: number
+  avg_latency_ms: number
+  avg_tps: number
+  request_count: number
+}
+
 export type PerfModelSummary = {
   model_name: string
   avg_latency_ms: number
   success_rate: number
   avg_tps: number
   recent_success_series?: SuccessRatePoint[]
+  recent_interval_series?: PerformanceIntervalPoint[]
   request_count?: number
 }
 
 export type PerfGroupSummaryInfo = {
   group: string
   ratio: number
-  model_count: number
+  sort_order: number
 }
 
 export type PerfSummaryAllData = {

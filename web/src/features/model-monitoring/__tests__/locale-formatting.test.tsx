@@ -16,7 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import i18next from 'i18next'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
@@ -30,7 +36,10 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
     ...actual,
     useQuery: () => ({
       data: {
-        groups: [{ group: 'default', ratio: 0.2, model_count: 2 }],
+        groups: [
+          { group: 'default', ratio: 0.2, sort_order: 10 },
+          { group: 'vip', ratio: 0.3, sort_order: 20 },
+        ],
         metrics: [
           {
             group: 'default',
@@ -40,10 +49,13 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
               success_rate: 99,
               avg_tps: 20,
               request_count: 1000,
-              recent_success_series: [
+              recent_interval_series: [
                 {
-                  ts: Math.floor(Date.now() / 1_000 / 3_600) * 3_600,
+                  ts: Math.floor(Date.now() / 1_000 / 300) * 300,
                   success_rate: 99,
+                  avg_latency_ms: 250,
+                  avg_tps: 20,
+                  request_count: 12,
                 },
               ],
             },
@@ -70,21 +82,30 @@ afterEach(async () => {
   await i18next.changeLanguage('en')
 })
 
-it('renders monitoring metrics and hourly details when the interface language is zhCN', async () => {
+it('renders compact group metrics and five-minute details in zhCN', async () => {
   expect(() => render(<ModelMonitoring />)).not.toThrow()
   expect(screen.getAllByText('default')).toHaveLength(1)
-  expect(screen.queryByText('gpt-test')).not.toBeInTheDocument()
-  expect(screen.queryByText('claude-test')).not.toBeInTheDocument()
   expect(
-    screen.getByText(i18next.t('{{count}} models', { count: 2 }))
-  ).toBeInTheDocument()
-  expect(screen.getByText('1,000')).toBeInTheDocument()
-  expect(screen.getByText('0.2x')).toBeInTheDocument()
+    [...document.querySelectorAll('[data-slot="card-title"]')].map(
+      (element) => element.textContent
+    )
+  ).toEqual(['vip', 'default'])
   expect(screen.getByText('¥2 / USD')).toBeInTheDocument()
+  expect(screen.queryByText('1,000')).not.toBeInTheDocument()
+  expect(screen.queryByText('0.2x')).not.toBeInTheDocument()
+  expect(screen.getByText('250ms')).toBeInTheDocument()
+  expect(screen.getByText('20.0 t/s')).toBeInTheDocument()
+  expect(screen.getAllByText(i18next.t('Normal')).length).toBeGreaterThan(0)
 
-  const history = screen.getByRole('img', {
+  const defaultGroupCard = screen
+    .getByText('default')
+    .closest('[data-slot="card"]')
+  if (!(defaultGroupCard instanceof HTMLElement)) {
+    throw new Error('Default group card was not rendered')
+  }
+  const history = within(defaultGroupCard).getByRole('img', {
     name: i18next.t(
-      'Recent success-rate samples; gray bars indicate missing data.'
+      'Recent performance samples at five-minute intervals; gray bars indicate missing data.'
     ),
   })
   const bars = history.querySelectorAll('[data-slot="tooltip-trigger"]')
@@ -95,5 +116,26 @@ it('renders monitoring metrics and hourly details when the interface language is
       screen.getByText(`${i18next.t('Availability')}:`)
     ).toBeInTheDocument()
     expect(screen.getByText('99.0%')).toBeInTheDocument()
+    expect(
+      screen.getByText(`${i18next.t('Average latency')}:`)
+    ).toBeInTheDocument()
+    expect(screen.getByText(`${i18next.t('Throughput')}:`)).toBeInTheDocument()
+    expect(screen.getByText(`${i18next.t('Requests')}:`)).toBeInTheDocument()
+    expect(screen.getByText('12')).toBeInTheDocument()
+  })
+})
+
+it('finds groups by their effective price', async () => {
+  render(<ModelMonitoring />)
+  const search = screen.getByPlaceholderText(i18next.t('Search groups'))
+
+  fireEvent.change(search, { target: { value: '¥2' } })
+  await waitFor(() => {
+    expect(screen.getByText('¥2 / USD')).toBeInTheDocument()
+  })
+
+  fireEvent.change(search, { target: { value: '¥9' } })
+  await waitFor(() => {
+    expect(screen.queryByText('¥2 / USD')).not.toBeInTheDocument()
   })
 })

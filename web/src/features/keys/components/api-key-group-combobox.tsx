@@ -48,6 +48,7 @@ export type ApiKeyGroupOption = {
   label: string
   desc?: string
   ratio?: number | string
+  sortOrder?: number
 }
 
 type ApiKeyGroupComboboxProps = {
@@ -69,14 +70,25 @@ export function ApiKeyGroupCombobox({
   const [open, setOpen] = useState(false)
   const [searchValue, setSearchValue] = useState('')
   const shouldReduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
-  const selectedOption = options.find((option) => option.value === value)
+  const orderedOptions = useMemo(
+    () =>
+      [...options].sort((left, right) => {
+        if (left.value === 'auto') return -1
+        if (right.value === 'auto') return 1
+        const orderDifference = (right.sortOrder ?? 0) - (left.sortOrder ?? 0)
+        if (orderDifference !== 0) return orderDifference
+        return left.label.localeCompare(right.label)
+      }),
+    [options]
+  )
+  const selectedOption = orderedOptions.find((option) => option.value === value)
   const isAutoSelected = selectedOption?.value === 'auto'
 
   const filteredOptions = useMemo(() => {
     const search = searchValue.trim().toLowerCase()
-    if (!search) return options
+    if (!search) return orderedOptions
 
-    return options.filter((option) => {
+    return orderedOptions.filter((option) => {
       const ratioText = String(option.ratio ?? '').toLowerCase()
       return (
         option.value.toLowerCase().includes(search) ||
@@ -85,7 +97,7 @@ export function ApiKeyGroupCombobox({
         ratioText.includes(search)
       )
     })
-  }, [options, searchValue])
+  }, [orderedOptions, searchValue])
 
   const handleSelect = (selectedValue: string) => {
     onValueChange(selectedValue)

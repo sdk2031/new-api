@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Combobox } from '@/components/ui/combobox'
 import {
   AlertTriangle,
   ChevronDown,
@@ -58,9 +57,9 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-
 import {
   Sheet,
   SheetContent,
@@ -73,6 +72,7 @@ import { safeJsonParse } from '../utils/json-parser'
 
 type GroupRatioVisualEditorProps = {
   groupRatio: string
+  groupOrder: string
   topupGroupRatio: string
   userUsableGroups: string
   groupGroupRatio: string
@@ -85,6 +85,7 @@ type GroupRatioVisualEditorProps = {
 type GroupPricingRow = {
   _id: string
   name: string
+  sortOrder: string
   ratio: string
   topupRatio: string
   selectable: boolean
@@ -137,29 +138,39 @@ function parseNestedRatioMap(
 function buildGroupPricingRows(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string
+  topupGroupRatio: string,
+  groupOrder: string
 ): GroupPricingRow[] {
   const ratioMap = parseRatioMap(groupRatio)
   const usableMap = parseUsableMap(userUsableGroups)
   const topupMap = parseRatioMap(topupGroupRatio)
+  const orderMap = parseRatioMap(groupOrder)
   const names = new Set([
     ...Object.keys(ratioMap),
     ...Object.keys(usableMap),
     ...Object.keys(topupMap),
   ])
 
-  return [...names].map((name) => ({
-    _id: createGroupPricingId(),
-    name,
-    ratio: String(normalizeRatio(ratioMap[name])),
-    topupRatio: Object.hasOwn(topupMap, name) ? String(topupMap[name]) : '',
-    selectable: Object.hasOwn(usableMap, name),
-    description: String(usableMap[name] ?? ''),
-  }))
+  return [...names]
+    .map((name) => ({
+      _id: createGroupPricingId(),
+      name,
+      sortOrder: String(orderMap[name] ?? 0),
+      ratio: String(normalizeRatio(ratioMap[name])),
+      topupRatio: Object.hasOwn(topupMap, name) ? String(topupMap[name]) : '',
+      selectable: Object.hasOwn(usableMap, name),
+      description: String(usableMap[name] ?? ''),
+    }))
+    .sort(
+      (left, right) =>
+        Number(right.sortOrder) - Number(left.sortOrder) ||
+        left.name.localeCompare(right.name)
+    )
 }
 
 function serializeGroupPricingRows(rows: GroupPricingRow[]) {
   const groupRatio: Record<string, number> = {}
+  const groupOrder: Record<string, number> = {}
   const userUsableGroups: Record<string, string> = {}
   const topupGroupRatio: Record<string, number> = {}
 
@@ -167,6 +178,7 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
     const name = row.name.trim()
     if (!name) continue
     groupRatio[name] = normalizeRatio(row.ratio)
+    groupOrder[name] = Math.trunc(Number(row.sortOrder) || 0)
     if (row.selectable) {
       userUsableGroups[name] = row.description
     }
@@ -178,6 +190,7 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
 
   return {
     GroupRatio: JSON.stringify(groupRatio, null, 2),
+    GroupOrder: JSON.stringify(groupOrder, null, 2),
     UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
     TopupGroupRatio: JSON.stringify(topupGroupRatio, null, 2),
   }
@@ -187,6 +200,7 @@ function groupPricingSignature(rows: GroupPricingRow[]): string {
   const serialized = serializeGroupPricingRows(rows)
   return JSON.stringify({
     groupRatio: parseRatioMap(serialized.GroupRatio),
+    groupOrder: parseRatioMap(serialized.GroupOrder),
     userUsableGroups: parseUsableMap(serialized.UserUsableGroups),
     topupGroupRatio: parseRatioMap(serialized.TopupGroupRatio),
   })
@@ -195,10 +209,12 @@ function groupPricingSignature(rows: GroupPricingRow[]): string {
 function sourceGroupPricingSignature(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string
+  topupGroupRatio: string,
+  groupOrder: string
 ): string {
   return JSON.stringify({
     groupRatio: parseRatioMap(groupRatio),
+    groupOrder: parseRatioMap(groupOrder),
     userUsableGroups: parseUsableMap(userUsableGroups),
     topupGroupRatio: parseRatioMap(topupGroupRatio),
   })
@@ -232,18 +248,21 @@ function GroupNameSelect(props: GroupNameSelectProps) {
 
   return (
     <Combobox
-  options={options.map((name) => ({ value: name, label: name }))}
-  value={props.value}
-  onValueChange={(value) => { if (value) props.onValueChange(value) }}
-  className={props.className ?? 'w-48'}
-  placeholder={props.placeholder}
-  aria-label={props.placeholder}
-/>
+      options={options.map((name) => ({ value: name, label: name }))}
+      value={props.value}
+      onValueChange={(value) => {
+        if (value) props.onValueChange(value)
+      }}
+      className={props.className ?? 'w-48'}
+      placeholder={props.placeholder}
+      aria-label={props.placeholder}
+    />
   )
 }
 
 export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupRatio,
+  groupOrder,
   topupGroupRatio,
   userUsableGroups,
   groupGroupRatio,
@@ -259,16 +278,23 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
     const ratioMap = parseRatioMap(groupRatio)
     const usableMap = parseUsableMap(userUsableGroups)
     const topupMap = parseRatioMap(topupGroupRatio)
+    const orderMap = parseRatioMap(groupOrder)
     const names = new Set([
       ...Object.keys(ratioMap),
       ...Object.keys(usableMap),
       ...Object.keys(topupMap),
     ])
-    return [...names].map((name) => ({
-      name,
-      ratio: normalizeRatio(ratioMap[name]),
-    }))
-  }, [groupRatio, userUsableGroups, topupGroupRatio])
+    return [...names]
+      .map((name) => ({
+        name,
+        ratio: normalizeRatio(ratioMap[name]),
+      }))
+      .sort(
+        (left, right) =>
+          (orderMap[right.name] ?? 0) - (orderMap[left.name] ?? 0) ||
+          left.name.localeCompare(right.name)
+      )
+  }, [groupRatio, userUsableGroups, topupGroupRatio, groupOrder])
 
   const registryNames = useMemo(
     () => registry.map((entry) => entry.name),
@@ -319,6 +345,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
     <div className='space-y-4'>
       <GroupPricingTable
         groupRatio={groupRatio}
+        groupOrder={groupOrder}
         userUsableGroups={userUsableGroups}
         topupGroupRatio={topupGroupRatio}
         onChange={onChange}
@@ -411,6 +438,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 
 type GroupPricingTableProps = {
   groupRatio: string
+  groupOrder: string
   userUsableGroups: string
   topupGroupRatio: string
   onChange: (field: string, value: string) => void
@@ -419,6 +447,7 @@ type GroupPricingTableProps = {
 
 function GroupPricingTable({
   groupRatio,
+  groupOrder,
   userUsableGroups,
   topupGroupRatio,
   onChange,
@@ -426,14 +455,20 @@ function GroupPricingTable({
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
-    buildGroupPricingRows(groupRatio, userUsableGroups, topupGroupRatio)
+    buildGroupPricingRows(
+      groupRatio,
+      userUsableGroups,
+      topupGroupRatio,
+      groupOrder
+    )
   )
 
   useEffect(() => {
     const incomingSignature = sourceGroupPricingSignature(
       groupRatio,
       userUsableGroups,
-      topupGroupRatio
+      topupGroupRatio,
+      groupOrder
     )
     setRows((currentRows) => {
       if (groupPricingSignature(currentRows) === incomingSignature) {
@@ -442,16 +477,18 @@ function GroupPricingTable({
       return buildGroupPricingRows(
         groupRatio,
         userUsableGroups,
-        topupGroupRatio
+        topupGroupRatio,
+        groupOrder
       )
     })
-  }, [groupRatio, userUsableGroups, topupGroupRatio])
+  }, [groupRatio, userUsableGroups, topupGroupRatio, groupOrder])
 
   const emitRows = useCallback(
     (nextRows: GroupPricingRow[]) => {
       setRows(nextRows)
       const serialized = serializeGroupPricingRows(nextRows)
       onChange('GroupRatio', serialized.GroupRatio)
+      onChange('GroupOrder', serialized.GroupOrder)
       onChange('UserUsableGroups', serialized.UserUsableGroups)
       onChange('TopupGroupRatio', serialized.TopupGroupRatio)
     },
@@ -479,11 +516,14 @@ function GroupPricingTable({
       index += 1
       name = `group_${index}`
     }
+    const nextSortOrder =
+      Math.max(0, ...rows.map((row) => Number(row.sortOrder) || 0)) + 10
     emitRows([
       ...rows,
       {
         _id: createGroupPricingId(),
         name,
+        sortOrder: String(nextSortOrder),
         ratio: '1',
         topupRatio: '',
         selectable: true,
@@ -548,6 +588,21 @@ function GroupPricingTable({
                       updateRow(row._id, 'name', event.target.value)
                     }
                     aria-invalid={duplicateNames.includes(row.name.trim())}
+                  />
+                ),
+              },
+              {
+                id: 'sort-order',
+                header: t('Sort'),
+                className: 'w-24',
+                cell: (row) => (
+                  <Input
+                    type='number'
+                    step={1}
+                    value={row.sortOrder}
+                    onChange={(event) =>
+                      updateRow(row._id, 'sortOrder', event.target.value)
+                    }
                   />
                 ),
               },

@@ -18,12 +18,22 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
-import { PublicLayout } from '@/components/layout'
+import { AuthenticatedLayout, PublicLayout } from '@/components/layout'
 import { ModelMonitoring } from '@/features/model-monitoring'
 import { getModuleAccessForGuard } from '@/lib/nav-modules'
 import { useAuthStore } from '@/stores/auth-store'
 
 function MonitoringPage() {
+  const user = useAuthStore((state) => state.auth.user)
+
+  if (user) {
+    return (
+      <AuthenticatedLayout>
+        <ModelMonitoring />
+      </AuthenticatedLayout>
+    )
+  }
+
   return (
     <PublicLayout showMainContainer={false}>
       <div className='flex min-h-svh flex-col pt-16'>

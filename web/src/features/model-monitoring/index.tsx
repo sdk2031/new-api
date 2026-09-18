@@ -56,6 +56,8 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getPerfMetricsSummary } from '@/features/performance-metrics/api'
 import {
+  formatLatency,
+  formatThroughput,
   formatUptimePct,
   getSuccessRateDotClass,
   getSuccessRateTextClass,
@@ -69,14 +71,14 @@ import { toIntlLocale } from '@/i18n/languages'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
-import { ModelMetrics } from './model-metrics'
 import { ModelStatusHistory } from './model-status-history'
 
 const PERFORMANCE_WINDOW_HOURS = 24
 const REFRESH_INTERVAL_MS = 60_000
-const ONLINE_RATE_MIN = 70
+const NORMAL_RATE_MIN = 90
+const FLUCTUATING_RATE_MIN = 70
 
-type StatusFilter = 'all' | 'online' | 'offline' | 'unknown'
+type StatusFilter = 'all' | 'normal' | 'fluctuating' | 'abnormal' | 'unknown'
 
 type GroupMetricsResult = {
   group: string
@@ -90,8 +92,8 @@ type GroupMonitoringResult = {
 
 type MonitoringRow = {
   group: string
-  ratio: number
-  modelCount: number
+  sortOrder: number
+  effectivePrice: number
   perf?: PerfModelSummary
   status: Exclude<StatusFilter, 'all'>
 }
@@ -100,7 +102,9 @@ function getMonitoringStatus(
   perf: PerfModelSummary | undefined
 ): MonitoringRow['status'] {
   if (!perf || !Number.isFinite(perf.success_rate)) return 'unknown'
-  return perf.success_rate >= ONLINE_RATE_MIN ? 'online' : 'offline'
+  if (perf.success_rate >= NORMAL_RATE_MIN) return 'normal'
+  if (perf.success_rate >= FLUCTUATING_RATE_MIN) return 'fluctuating'
+  return 'abnormal'
 }
 
 export function ModelMonitoring() {
@@ -111,6 +115,16 @@ export function ModelMonitoring() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [now, setNow] = useState(0)
   const { status } = useStatus()
+  const rawPriceRate = Number(status?.price)
+  const priceRate =
+    Number.isFinite(rawPriceRate) && rawPriceRate >= 0 ? rawPriceRate : 1
+  const priceFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(locale, {
+        maximumFractionDigits: 6,
+      }),
+    [locale]
+  )
   const metricsQuery = useQuery({
     queryKey: ['perf-metrics-group-summary', PERFORMANCE_WINDOW_HOURS],
     queryFn: async (): Promise<GroupMonitoringResult> => {
@@ -158,29 +172,31 @@ export function ModelMonitoring() {
         const perf = perfMap.get(groupInfo.group)
         return {
           group: groupInfo.group,
-          ratio: groupInfo.ratio,
-          modelCount: groupInfo.model_count,
+          sortOrder: groupInfo.sort_order ?? 0,
+          effectivePrice: groupInfo.ratio * priceRate,
           perf,
           status: getMonitoringStatus(perf),
         }
       })
       .sort((left, right) => {
-        if (left.status === 'unknown' && right.status !== 'unknown') return 1
-        if (left.status !== 'unknown' && right.status === 'unknown') return -1
-        if (left.perf && right.perf) {
-          return left.perf.success_rate - right.perf.success_rate
-        }
+        const orderDifference = right.sortOrder - left.sortOrder
+        if (orderDifference !== 0) return orderDifference
         return left.group.localeCompare(right.group)
       })
-  }, [metricsQuery.data?.groups, perfMap])
+  }, [metricsQuery.data?.groups, perfMap, priceRate])
 
   const filteredRows = useMemo(() => {
     return rows.filter((row) => {
       if (statusFilter !== 'all' && row.status !== statusFilter) return false
       if (!deferredSearch) return true
-      return row.group.toLowerCase().includes(deferredSearch)
+      const price = priceFormatter.format(row.effectivePrice).toLowerCase()
+      return (
+        row.group.toLowerCase().includes(deferredSearch) ||
+        price.includes(deferredSearch) ||
+        `¥${price}`.includes(deferredSearch)
+      )
     })
-  }, [deferredSearch, rows, statusFilter])
+  }, [deferredSearch, priceFormatter, rows, statusFilter])
 
   const summary = useMemo(() => {
     const measured = rows.filter((row) => row.perf)
@@ -192,8 +208,9 @@ export function ModelMonitoring() {
           ) / measured.length
         : Number.NaN
     return {
-      online: rows.filter((row) => row.status === 'online').length,
-      offline: rows.filter((row) => row.status === 'offline').length,
+      normal: rows.filter((row) => row.status === 'normal').length,
+      fluctuating: rows.filter((row) => row.status === 'fluctuating').length,
+      abnormal: rows.filter((row) => row.status === 'abnormal').length,
       unknown: rows.filter((row) => row.status === 'unknown').length,
       average,
     }
@@ -215,22 +232,43 @@ export function ModelMonitoring() {
         second: '2-digit',
       }).format(metricsQuery.dataUpdatedAt)
     : '—'
-  const rawPriceRate = Number(status?.price)
-  const priceRate =
-    Number.isFinite(rawPriceRate) && rawPriceRate >= 0 ? rawPriceRate : 1
 
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>
-        <span className='flex items-center gap-2'>
-          <HeartPulse className='size-5 text-emerald-500' />
-          {t('Group monitoring')}
+        <span className='flex flex-wrap items-center gap-x-3 gap-y-1 whitespace-normal'>
+          <span className='flex items-center gap-2'>
+            <HeartPulse className='size-5 text-emerald-500' />
+            {t('Group monitoring')}
+          </span>
+          <span className='text-muted-foreground flex flex-wrap items-center gap-x-2 text-[11px] font-normal tabular-nums'>
+            <span>
+              {t('Normal')} {summary.normal.toLocaleString(locale)}
+            </span>
+            <span>
+              {t('Fluctuating')} {summary.fluctuating.toLocaleString(locale)}
+            </span>
+            <span>
+              {t('Abnormal')} {summary.abnormal.toLocaleString(locale)}
+            </span>
+            <span>
+              {t('No data')} {summary.unknown.toLocaleString(locale)}
+            </span>
+            <span>
+              {t('Average availability')} {formatUptimePct(summary.average)}
+            </span>
+          </span>
         </span>
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
-        <span className='text-muted-foreground hidden items-center gap-1.5 text-xs tabular-nums sm:flex'>
-          <Clock3 className='size-3.5' />
-          {t('Refreshes in {{seconds}}s', { seconds: secondsToRefresh })}
+        <span className='text-muted-foreground hidden items-center gap-3 text-xs tabular-nums sm:flex'>
+          <span>
+            {t('Last updated')}: {updatedAt}
+          </span>
+          <span className='flex items-center gap-1.5'>
+            <Clock3 className='size-3.5' />
+            {t('Refreshes in {{seconds}}s', { seconds: secondsToRefresh })}
+          </span>
         </span>
         <Button
           type='button'
@@ -248,39 +286,11 @@ export function ModelMonitoring() {
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='mx-auto w-full max-w-[1800px] space-y-4'>
-          <div>
-            <p className='text-muted-foreground text-sm'>
-              {t(
-                'Monitor group availability, latency, and throughput from real API traffic.'
-              )}
-            </p>
-            <p className='text-muted-foreground/70 mt-1 text-xs'>
-              {t('Last updated')}: {updatedAt}
-            </p>
-          </div>
-
-          <div className='bg-card grid grid-cols-2 overflow-hidden rounded-lg border sm:grid-cols-4'>
-            <SummaryMetric
-              label={t('Online')}
-              value={summary.online.toLocaleString(locale)}
-              tone='text-emerald-600 dark:text-emerald-400'
-            />
-            <SummaryMetric
-              label={t('Offline')}
-              value={summary.offline.toLocaleString(locale)}
-              tone='text-red-600 dark:text-red-400'
-            />
-            <SummaryMetric
-              label={t('No data')}
-              value={summary.unknown.toLocaleString(locale)}
-              tone='text-muted-foreground'
-            />
-            <SummaryMetric
-              label={t('Average availability')}
-              value={formatUptimePct(summary.average)}
-              tone={getSuccessRateTextClass(summary.average)}
-            />
-          </div>
+          <p className='text-muted-foreground text-sm'>
+            {t(
+              'Based on usage data from models in each group. For reference only; actual calls take precedence.'
+            )}
+          </p>
 
           <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
             <div className='relative w-full sm:max-w-sm'>
@@ -295,13 +305,14 @@ export function ModelMonitoring() {
             <div
               role='group'
               aria-label={t('Status')}
-              className='bg-muted/60 grid grid-cols-4 rounded-lg p-1'
+              className='bg-muted/60 flex max-w-full overflow-x-auto rounded-lg p-1'
             >
               {(
                 [
                   ['all', t('All')],
-                  ['online', t('Online')],
-                  ['offline', t('Offline')],
+                  ['normal', t('Normal')],
+                  ['fluctuating', t('Fluctuating')],
+                  ['abnormal', t('Abnormal')],
                   ['unknown', t('No data')],
                 ] as const
               ).map(([value, label]) => (
@@ -312,7 +323,7 @@ export function ModelMonitoring() {
                   variant={statusFilter === value ? 'secondary' : 'ghost'}
                   aria-pressed={statusFilter === value}
                   onClick={() => startTransition(() => setStatusFilter(value))}
-                  className='min-w-0 px-2'
+                  className='shrink-0 px-2'
                 >
                   {label}
                 </Button>
@@ -323,7 +334,6 @@ export function ModelMonitoring() {
           <MonitoringResults
             loading={metricsQuery.isLoading}
             rows={filteredRows}
-            priceRate={priceRate}
           />
         </div>
       </SectionPageLayout.Content>
@@ -331,37 +341,21 @@ export function ModelMonitoring() {
   )
 }
 
-function SummaryMetric(props: { label: string; value: string; tone: string }) {
-  return (
-    <div className='border-border/70 border-b p-3 odd:border-r sm:border-r sm:border-b-0 sm:last:border-r-0'>
-      <div className='text-muted-foreground text-xs'>{props.label}</div>
-      <div
-        className={cn(
-          'mt-1 font-mono text-xl font-semibold tabular-nums',
-          props.tone
-        )}
-      >
-        {props.value}
-      </div>
-    </div>
-  )
-}
-
-function MonitoringCard(props: { row: MonitoringRow; priceRate: number }) {
+function MonitoringCard(props: { row: MonitoringRow }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
-  const { group, ratio, modelCount, perf, status } = props.row
+  const perf = props.row.perf
   const successRate = perf?.success_rate ?? Number.NaN
-  const numberFormatter = new Intl.NumberFormat(locale, {
+  const effectivePrice = new Intl.NumberFormat(locale, {
     maximumFractionDigits: 6,
-  })
-  const effectivePrice = numberFormatter.format(ratio * props.priceRate)
+  }).format(props.row.effectivePrice)
   let statusLabel = t('No data')
-  if (status === 'online') statusLabel = t('Online')
-  if (status === 'offline') statusLabel = t('Offline')
+  if (props.row.status === 'normal') statusLabel = t('Normal')
+  if (props.row.status === 'fluctuating') statusLabel = t('Fluctuating')
+  if (props.row.status === 'abnormal') statusLabel = t('Abnormal')
 
   return (
-    <Card className='gap-3 rounded-lg py-3'>
+    <Card className='w-full gap-3 rounded-lg py-3 sm:max-w-[22rem]'>
       <CardHeader className='grid-cols-[1fr_auto] px-3'>
         <div className='flex min-w-0 items-center gap-2.5'>
           <div className='bg-muted flex size-9 shrink-0 items-center justify-center rounded-lg'>
@@ -369,10 +363,10 @@ function MonitoringCard(props: { row: MonitoringRow; priceRate: number }) {
           </div>
           <div className='min-w-0'>
             <CardTitle className='truncate font-mono text-sm'>
-              {group}
+              {props.row.group}
             </CardTitle>
-            <CardDescription className='truncate text-xs'>
-              {t('{{count}} models', { count: modelCount })}
+            <CardDescription className='truncate font-mono text-xs tabular-nums'>
+              ¥{effectivePrice} / USD
             </CardDescription>
           </div>
         </div>
@@ -381,7 +375,7 @@ function MonitoringCard(props: { row: MonitoringRow; priceRate: number }) {
             <span
               className={cn(
                 'size-1.5 rounded-full',
-                status === 'unknown'
+                props.row.status === 'unknown'
                   ? 'bg-muted-foreground/40'
                   : getSuccessRateDotClass(successRate)
               )}
@@ -392,7 +386,7 @@ function MonitoringCard(props: { row: MonitoringRow; priceRate: number }) {
       </CardHeader>
 
       <CardContent className='space-y-3 px-3'>
-        <div className='flex items-end justify-between gap-3'>
+        <div className='flex items-end justify-between gap-4'>
           <div>
             <div className='text-muted-foreground text-[11px]'>
               {t('Success rate')}
@@ -400,7 +394,7 @@ function MonitoringCard(props: { row: MonitoringRow; priceRate: number }) {
             <div
               className={cn(
                 'mt-0.5 font-mono text-3xl font-semibold tabular-nums',
-                status === 'unknown'
+                props.row.status === 'unknown'
                   ? 'text-muted-foreground'
                   : getSuccessRateTextClass(successRate)
               )}
@@ -408,67 +402,46 @@ function MonitoringCard(props: { row: MonitoringRow; priceRate: number }) {
               {formatUptimePct(successRate)}
             </div>
           </div>
-          <div className='text-right'>
-            <div className='text-muted-foreground text-[11px]'>
-              {t('Requests')}
+          <dl className='grid shrink-0 grid-cols-2 gap-4 text-right text-xs tabular-nums'>
+            <div>
+              <dt className='text-muted-foreground text-[11px]'>
+                {t('Average latency')}
+              </dt>
+              <dd className='mt-1 font-mono font-semibold'>
+                {formatLatency(perf?.avg_latency_ms ?? 0)}
+              </dd>
             </div>
-            <div className='mt-0.5 font-mono text-sm font-semibold tabular-nums'>
-              {(perf?.request_count ?? 0).toLocaleString(locale)}
+            <div>
+              <dt className='text-muted-foreground text-[11px]'>
+                {t('Throughput')}
+              </dt>
+              <dd className='mt-1 font-mono font-semibold'>
+                {formatThroughput(perf?.avg_tps ?? 0)}
+              </dd>
             </div>
-          </div>
+          </dl>
         </div>
 
         <ModelStatusHistory
-          series={perf?.recent_success_series}
+          series={perf?.recent_interval_series}
           className='h-6 w-full gap-1'
           barClassName='min-w-0 flex-1 rounded-sm'
         />
-
-        <div className='border-border/60 grid grid-cols-2 gap-3 border-t pt-3'>
-          <div>
-            <div className='text-muted-foreground text-[11px]'>
-              {t('Group Ratio')}
-            </div>
-            <div className='mt-1 font-mono text-sm font-semibold tabular-nums'>
-              {numberFormatter.format(ratio)}x
-            </div>
-          </div>
-          <div className='text-right'>
-            <div className='text-muted-foreground text-[11px]'>
-              {t('Effective price')}
-            </div>
-            <div className='mt-1 font-mono text-sm font-semibold tabular-nums'>
-              ¥{effectivePrice} / USD
-            </div>
-          </div>
-        </div>
       </CardContent>
-
-      <div className='border-border/60 mx-3 border-t pt-2'>
-        <ModelMetrics perf={perf} />
-      </div>
     </Card>
   )
 }
 
-function MonitoringResults(props: {
-  loading: boolean
-  rows: MonitoringRow[]
-  priceRate: number
-}) {
+function MonitoringResults(props: { loading: boolean; rows: MonitoringRow[] }) {
   const { t } = useTranslation()
 
   if (props.loading) return <MonitoringSkeleton />
 
   if (props.rows.length > 0) {
     return (
-      <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3'>
+      <div className='grid grid-cols-1 justify-start gap-3 sm:grid-cols-[repeat(auto-fill,minmax(18rem,22rem))]'>
         {props.rows.map((row) => (
-          <MonitoringCard
-            key={row.group}
-            row={row}
-            priceRate={props.priceRate}
-          />
+          <MonitoringCard key={row.group} row={row} />
         ))}
       </div>
     )
@@ -491,9 +464,12 @@ function MonitoringResults(props: {
 
 function MonitoringSkeleton() {
   return (
-    <div className='grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3'>
+    <div className='grid grid-cols-1 justify-start gap-3 sm:grid-cols-[repeat(auto-fill,minmax(18rem,22rem))]'>
       {Array.from({ length: 6 }, (_, index) => (
-        <Card key={index} className='gap-3 rounded-lg py-3'>
+        <Card
+          key={index}
+          className='w-full gap-3 rounded-lg py-3 sm:max-w-[22rem]'
+        >
           <CardHeader className='px-3'>
             <div className='flex items-center gap-2.5'>
               <Skeleton className='size-9' />
@@ -506,7 +482,6 @@ function MonitoringSkeleton() {
           <CardContent className='space-y-3 px-3'>
             <Skeleton className='h-9 w-28' />
             <Skeleton className='h-6 w-full' />
-            <Skeleton className='h-5 w-36' />
           </CardContent>
         </Card>
       ))}

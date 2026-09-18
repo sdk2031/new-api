@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -204,12 +205,13 @@ func buildModelSummary(name string, total counters, buckets map[int64]counters) 
 		avgTps = float64(total.outputTokens) / (float64(total.generationMs) / 1000.0)
 	}
 	return ModelSummary{
-		ModelName:           name,
-		AvgLatencyMs:        avgLatency,
-		SuccessRate:         math.Round(successRate*100) / 100,
-		AvgTps:              math.Round(avgTps*100) / 100,
-		RecentSuccessSeries: recentSuccessSeries(buckets),
-		RequestCount:        total.requestCount,
+		ModelName:            name,
+		AvgLatencyMs:         avgLatency,
+		SuccessRate:          math.Round(successRate*100) / 100,
+		AvgTps:               math.Round(avgTps*100) / 100,
+		RecentSuccessSeries:  recentSuccessSeries(buckets),
+		RecentIntervalSeries: recentIntervalSeries(buckets),
+		RequestCount:         total.requestCount,
 	}
 }
 
@@ -287,6 +289,44 @@ func recentSuccessSeries(buckets map[int64]counters) []SuccessRatePoint {
 		points = append(points, SuccessRatePoint{
 			Ts:          hourTs,
 			SuccessRate: math.Round(successRate(hourly[hourTs])*100) / 100,
+		})
+	}
+	return points
+}
+
+func recentIntervalSeries(buckets map[int64]counters) []PerformanceIntervalPoint {
+	if len(buckets) == 0 {
+		return nil
+	}
+
+	const intervalSeconds int64 = 300
+	intervals := map[int64]counters{}
+	for ts, value := range buckets {
+		intervalTs := ts - ts%intervalSeconds
+		intervals[intervalTs] = addCounters(intervals[intervalTs], value)
+	}
+
+	timestamps := make([]int64, 0, len(intervals))
+	for intervalTs, value := range intervals {
+		if value.requestCount > 0 {
+			timestamps = append(timestamps, intervalTs)
+		}
+	}
+	slices.Sort(timestamps)
+
+	points := make([]PerformanceIntervalPoint, 0, len(timestamps))
+	for _, intervalTs := range timestamps {
+		value := intervals[intervalTs]
+		avgTps := 0.0
+		if value.generationMs > 0 {
+			avgTps = float64(value.outputTokens) / (float64(value.generationMs) / 1000.0)
+		}
+		points = append(points, PerformanceIntervalPoint{
+			Ts:           intervalTs,
+			SuccessRate:  math.Round(successRate(value)*100) / 100,
+			AvgLatencyMs: value.totalLatencyMs / value.requestCount,
+			AvgTps:       math.Round(avgTps*100) / 100,
+			RequestCount: value.requestCount,
 		})
 	}
 	return points

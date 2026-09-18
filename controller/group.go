@@ -12,14 +12,10 @@ import (
 )
 
 func GetGroups(c *gin.Context) {
-	groupNames := make([]string, 0)
-	for groupName := range ratio_setting.GetGroupRatioCopy() {
-		groupNames = append(groupNames, groupName)
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    groupNames,
+		"data":    ratio_setting.GetOrderedGroupNames(),
 	})
 }
 
@@ -29,19 +25,21 @@ func GetUserGroups(c *gin.Context) {
 	userId := c.GetInt("id")
 	userGroup, _ = model.GetUserGroup(userId, false)
 	userUsableGroups := service.GetUserUsableGroups(userGroup)
-	for groupName, _ := range ratio_setting.GetGroupRatioCopy() {
+	for _, groupName := range ratio_setting.GetOrderedGroupNames() {
 		// UserUsableGroups contains the groups that the user can use
 		if desc, ok := userUsableGroups[groupName]; ok {
 			usableGroups[groupName] = map[string]any{
-				"ratio": service.GetUserGroupRatio(userGroup, groupName),
-				"desc":  desc,
+				"ratio":      service.GetUserGroupRatio(userGroup, groupName),
+				"desc":       desc,
+				"sort_order": ratio_setting.GetGroupOrder(groupName),
 			}
 		}
 	}
 	if _, ok := userUsableGroups["auto"]; ok {
 		usableGroups["auto"] = map[string]any{
-			"ratio": "自动",
-			"desc":  setting.GetUsableGroupDescription("auto"),
+			"ratio":      "自动",
+			"desc":       setting.GetUsableGroupDescription("auto"),
+			"sort_order": 0,
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{

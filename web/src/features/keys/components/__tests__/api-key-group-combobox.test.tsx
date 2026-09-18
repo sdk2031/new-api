@@ -62,9 +62,22 @@ const options = [
     label: 'auto',
     desc: 'Global automatic routing',
     ratio: '自动',
+    sortOrder: 0,
   },
-  { value: 'default', label: 'default', desc: 'User group', ratio: 1 },
-  { value: 'vip', label: 'vip', desc: 'Priority group', ratio: 3 },
+  {
+    value: 'default',
+    label: 'default',
+    desc: 'User group',
+    ratio: 1,
+    sortOrder: 10,
+  },
+  {
+    value: 'vip',
+    label: 'vip',
+    desc: 'Priority group',
+    ratio: 3,
+    sortOrder: 20,
+  },
 ]
 
 function Harness(props: { initialValue: string }) {
@@ -136,6 +149,13 @@ describe('API key group combobox Auto effect', () => {
 
     fireEvent.click(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
+
+    const orderedOptions = [
+      ...document.querySelectorAll<HTMLElement>('[data-slot="command-item"]'),
+    ]
+    expect(orderedOptions[0]).toHaveTextContent('Global automatic routing')
+    expect(orderedOptions[1]).toHaveTextContent('Priority group')
+    expect(orderedOptions[2]).toHaveTextContent('User group')
 
     const autoOption = getCommandItem('Global automatic routing')
     expect(autoOption).toHaveAttribute('data-auto-group-effect', 'option')
