@@ -161,7 +161,9 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
     within(vipGroupCard).getByText(i18next.t('No data'))
   ).toBeInTheDocument()
   const emptyHistory = within(vipGroupCard).getByRole('img', {
-    name: i18next.t('Performance in the latest 24 five-minute intervals.'),
+    name: i18next.t(
+      'Recent performance samples at five-minute intervals; gray bars indicate missing data.'
+    ),
   })
   expect(
     emptyHistory.querySelectorAll('[data-slot="status-empty"]')
@@ -182,6 +184,15 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
     within(providerGroupCard).getByText(i18next.t('Normal'))
   ).toBeInTheDocument()
   expect(within(providerGroupCard).getByText('95.00%')).toBeInTheDocument()
+  const providerHistory = within(providerGroupCard).getByRole('img', {
+    name: i18next.t(
+      'Recent performance samples at five-minute intervals; gray bars indicate missing data.'
+    ),
+  })
+  expect(
+    providerHistory.querySelectorAll('[data-slot="status-empty"]')
+  ).toHaveLength(0)
+  expect(providerHistory.querySelectorAll('.bg-emerald-400')).toHaveLength(24)
 
   const defaultGroupCard = screen
     .getByText('default')
@@ -190,7 +201,9 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
     throw new Error('Default group card was not rendered')
   }
   const history = within(defaultGroupCard).getByRole('img', {
-    name: i18next.t('Performance in the latest 24 five-minute intervals.'),
+    name: i18next.t(
+      'Recent performance samples at five-minute intervals; gray bars indicate missing data.'
+    ),
   })
   expect(history).not.toHaveAttribute('title')
   const bars = history.querySelectorAll('[data-slot="tooltip-trigger"]')
@@ -231,7 +244,6 @@ it('keeps a single active record compact and updates its color in place', () => 
   const timestamp = Math.floor(Date.now() / 1_000 / 300) * 300
   const { container, rerender } = render(
     <ModelStatusHistory
-      currentInterval={timestamp}
       series={[
         {
           ts: timestamp,
@@ -249,12 +261,12 @@ it('keeps a single active record compact and updates its color in place', () => 
   expect(bars.item(0)).toHaveClass('bg-emerald-500')
   expect(bars.item(0)).toHaveClass('w-full')
   expect(container.querySelectorAll('[data-slot="status-empty"]')).toHaveLength(
-    23
+    0
   )
+  expect(container.querySelectorAll('[aria-hidden="true"]')).toHaveLength(23)
 
   rerender(
     <ModelStatusHistory
-      currentInterval={timestamp}
       series={[
         {
           ts: timestamp,
@@ -272,11 +284,10 @@ it('keeps a single active record compact and updates its color in place', () => 
   expect(bars.item(0)).toHaveClass('bg-red-500')
 })
 
-it('backfills only leading silence with older active intervals', () => {
+it('compacts recent active intervals and fills the leading slots', () => {
   const timestamp = Math.floor(Date.now() / 1_000 / 300) * 300
   const { container } = render(
     <ModelStatusHistory
-      currentInterval={timestamp}
       series={[
         {
           ts: timestamp - 30 * 300,
@@ -317,6 +328,7 @@ it('backfills only leading silence with older active intervals', () => {
   expect(bars.item(2)).toHaveClass('bg-red-500')
   expect(bars.item(3)).toHaveClass('bg-emerald-500')
   expect(container.querySelectorAll('[data-slot="status-empty"]')).toHaveLength(
-    20
+    0
   )
+  expect(container.querySelectorAll('[aria-hidden="true"]')).toHaveLength(20)
 })

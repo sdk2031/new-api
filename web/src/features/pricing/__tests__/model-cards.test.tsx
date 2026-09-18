@@ -488,7 +488,7 @@ describe('model cards', () => {
     expect(grid).not.toHaveClass('min-[1440px]:grid-cols-3')
   })
 
-  it('lights slots 23 and 18 when series has the current hour and five hours earlier', () => {
+  it('compacts recent samples and fills leading slots from the oldest sample', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-07T12:00:00.000Z'))
     const currentHourStart = Math.floor(Date.now() / 1000 / 3600) * 3600
@@ -516,16 +516,14 @@ describe('model cards', () => {
     ]
     expect(spans).toHaveLength(24)
     spans.forEach((slot, index) => {
-      if (index === 18 || index === 23) {
-        expect(slot).not.toHaveClass('border', 'bg-muted-foreground/20')
-        return
-      }
-      expect(slot).toHaveClass('border', 'bg-muted-foreground/20')
+      expect(slot).not.toHaveClass('border', 'bg-muted-foreground/20')
+      if (index === 23) expect(slot).toHaveClass('bg-emerald-500')
+      else expect(slot).toHaveClass('bg-amber-500')
     })
     vi.useRealTimers()
   })
 
-  it('keeps all 24 slots gray when a series point is 24 hours before the current hour', () => {
+  it('keeps an old sample visible regardless of its age', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-07T12:00:00.000Z'))
     const currentHourStart = Math.floor(Date.now() / 1000 / 3600) * 3600
@@ -552,12 +550,12 @@ describe('model cards', () => {
     ]
     expect(spans).toHaveLength(24)
     spans.forEach((slot) => {
-      expect(slot).toHaveClass('border', 'bg-muted-foreground/20')
+      expect(slot).toHaveClass('bg-emerald-500')
     })
     vi.useRealTimers()
   })
 
-  it('keeps all 24 slots gray when recent_success_series is undefined', () => {
+  it('fills all slots from aggregate status when samples are unavailable', () => {
     render(
       <ModelCard
         model={pricingModel()}
@@ -573,11 +571,11 @@ describe('model cards', () => {
     ]
     expect(spans).toHaveLength(24)
     spans.forEach((slot) => {
-      expect(slot).toHaveClass('border', 'bg-muted-foreground/20')
+      expect(slot).toHaveClass('bg-emerald-500')
     })
   })
 
-  it('places a five-hour-old point in slot 18 when now is mid-hour', () => {
+  it('fills all slots from a single recent sample', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-07T12:37:00.000Z'))
     const currentHourStart = Math.floor(Date.now() / 1000 / 3600) * 3600
@@ -603,12 +601,8 @@ describe('model cards', () => {
       }).children,
     ]
     expect(spans).toHaveLength(24)
-    spans.forEach((slot, index) => {
-      if (index === 18) {
-        expect(slot).not.toHaveClass('border', 'bg-muted-foreground/20')
-        return
-      }
-      expect(slot).toHaveClass('border', 'bg-muted-foreground/20')
+    spans.forEach((slot) => {
+      expect(slot).toHaveClass('bg-amber-500')
     })
     vi.useRealTimers()
   })

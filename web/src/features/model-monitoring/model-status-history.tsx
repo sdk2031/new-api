@@ -35,8 +35,8 @@ import { cn } from '@/lib/utils'
 
 interface ModelStatusHistoryProps extends React.HTMLAttributes<HTMLDivElement> {
   series?: PerformanceIntervalPoint[]
+  fallbackMetrics?: Omit<PerformanceIntervalPoint, 'ts' | 'request_count'>
   barClassName?: string
-  currentInterval: number
 }
 
 export const MONITORING_SLOT_COUNT = 24
@@ -49,50 +49,51 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
 ) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
-  const { series, barClassName, currentInterval, className, ...rest } = props
+  const { series, fallbackMetrics, barClassName, className, ...rest } = props
   const statusPoints = useMemo(() => {
-    const metricsByInterval = new Map<number, PerformanceIntervalPoint>()
-    for (const point of series ?? []) {
-      if (
-        !Number.isFinite(point.success_rate) ||
-        point.success_rate < 0 ||
-        point.success_rate > 100
-      ) {
-        continue
+    const validPoints = (series ?? [])
+      .filter(
+        (point) =>
+          Number.isFinite(point.success_rate) &&
+          point.success_rate >= 0 &&
+          point.success_rate <= 100
+      )
+      .sort((left, right) => left.ts - right.ts)
+      .slice(-MONITORING_SLOT_COUNT)
+      .map((metrics) => ({ metrics, synthetic: false, slot: metrics.ts }))
+    if (validPoints.length === 0) {
+      const rate = fallbackMetrics?.success_rate
+      if (rate == null || !Number.isFinite(rate) || rate < 0 || rate > 100) {
+        return Array.from({ length: MONITORING_SLOT_COUNT }, (_, slot) => ({
+          metrics: undefined,
+          synthetic: true,
+          slot: -(slot + 1),
+        }))
       }
-      const interval = point.ts - (point.ts % MONITORING_INTERVAL_SECONDS)
-      metricsByInterval.set(interval, point)
+      const fallbackPoint: PerformanceIntervalPoint = {
+        ts: 0,
+        success_rate: rate,
+        avg_latency_ms: fallbackMetrics?.avg_latency_ms ?? 0,
+        avg_tps: fallbackMetrics?.avg_tps ?? 0,
+        request_count: 0,
+      }
+      return Array.from({ length: MONITORING_SLOT_COUNT }, (_, slot) => ({
+        metrics: fallbackPoint,
+        synthetic: true,
+        slot: -(slot + 1),
+      }))
     }
-    const windowPoints = Array.from(
-      { length: MONITORING_SLOT_COUNT },
-      (_, index) => {
-        const ts =
-          currentInterval -
-          (MONITORING_SLOT_COUNT - 1 - index) * MONITORING_INTERVAL_SECONDS
-        return { ts, metrics: metricsByInterval.get(ts) }
-      }
-    )
-    const firstActiveIndex = windowPoints.findIndex((point) => point.metrics)
-    if (firstActiveIndex === 0) return windowPoints
 
-    const leadingSlotCount =
-      firstActiveIndex === -1 ? MONITORING_SLOT_COUNT : firstActiveIndex
-    const windowStart = windowPoints[0].ts
-    const historicalPoints = [...metricsByInterval.entries()]
-      .filter(([ts]) => ts < windowStart)
-      .sort(([left], [right]) => left - right)
-      .slice(-leadingSlotCount)
-      .map(([ts, metrics]) => ({ ts, metrics }))
-    if (historicalPoints.length === 0) return windowPoints
-
-    const emptyLeadingSlots = windowPoints.slice(
-      0,
-      leadingSlotCount - historicalPoints.length
+    const padding = Array.from(
+      { length: MONITORING_SLOT_COUNT - validPoints.length },
+      (_, slot) => ({
+        metrics: validPoints[0].metrics,
+        synthetic: true,
+        slot: -(slot + 1),
+      })
     )
-    const activeWindow =
-      firstActiveIndex === -1 ? [] : windowPoints.slice(firstActiveIndex)
-    return [...emptyLeadingSlots, ...historicalPoints, ...activeWindow]
-  }, [currentInterval, series])
+    return [...padding, ...validPoints]
+  }, [fallbackMetrics, series])
   const timeFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
@@ -108,7 +109,9 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
   return (
     <div
       role='img'
-      aria-label={t('Performance in the latest 24 five-minute intervals.')}
+      aria-label={t(
+        'Recent performance samples at five-minute intervals; gray bars indicate missing data.'
+      )}
       className={cn(
         'grid h-3 w-24 grid-cols-[repeat(24,minmax(0,1fr))] items-center gap-px',
         className
@@ -119,7 +122,7 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
         if (!point.metrics) {
           return (
             <span
-              key={point.ts}
+              key={`empty-${point.slot}`}
               data-slot='status-empty'
               aria-hidden='true'
               className='border-border/50 bg-muted-foreground/20 h-full min-w-0 rounded-[1px] border'
@@ -128,14 +131,27 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
         }
 
         const rate = point.metrics.success_rate
+        if (point.synthetic) {
+          return (
+            <span
+              key={`synthetic-${point.slot}`}
+              aria-hidden='true'
+              className={cn(
+                'h-full w-full rounded-xs',
+                getSuccessRateDotClass(rate),
+                barClassName
+              )}
+            />
+          )
+        }
         let statusLabel = t('No data')
         if (rate >= NORMAL_RATE_MIN) statusLabel = t('Normal')
         else if (rate >= FLUCTUATING_RATE_MIN) {
           statusLabel = t('Fluctuating')
         } else statusLabel = t('Abnormal')
-        const timeLabel = timeFormatter.format(point.ts * 1_000)
+        const timeLabel = timeFormatter.format(point.metrics.ts * 1_000)
         return (
-          <Tooltip key={point.ts}>
+          <Tooltip key={point.metrics.ts}>
             <TooltipTrigger
               render={
                 <span

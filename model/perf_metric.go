@@ -115,6 +115,26 @@ func GetPerfMetricsSummaryBucketsAll(startTs int64, endTs int64, groups []string
 	return summaries, err
 }
 
+func GetLatestPerfMetricsSummaryBucketsBefore(beforeTs int64, groups []string) ([]PerfMetricSummaryBucket, error) {
+	var timestamps []int64
+	query := DB.Model(&PerfMetric{}).
+		Where("bucket_ts < ? AND request_count > 0", beforeTs)
+	if groups != nil {
+		if len(groups) == 0 {
+			return nil, nil
+		}
+		query = query.Where(commonGroupCol+" IN ?", groups)
+	}
+	if err := query.
+		Distinct("bucket_ts").
+		Order("bucket_ts DESC").
+		Limit(1).
+		Pluck("bucket_ts", &timestamps).Error; err != nil || len(timestamps) == 0 {
+		return nil, err
+	}
+	return GetPerfMetricsSummaryBucketsAll(timestamps[0], timestamps[0], groups)
+}
+
 func DeletePerfMetricsBefore(cutoffTs int64) error {
 	if cutoffTs <= 0 {
 		return nil

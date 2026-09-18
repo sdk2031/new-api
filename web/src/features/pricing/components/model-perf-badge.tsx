@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -55,27 +55,27 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
     Number.isFinite(successRate) &&
     successRate >= 0 &&
     successRate <= 100
-  const [currentHourStart, setCurrentHourStart] = useState(
-    () => Math.floor(Date.now() / 1000 / 3600) * 3600
-  )
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setCurrentHourStart(Math.floor(Date.now() / 1000 / 3600) * 3600)
-    }, 60_000)
-    return () => window.clearInterval(timer)
-  }, [])
-  // Hourly points with timestamps, anchored to the client's current hour.
-  // Hours without traffic stay gray. Slot 23 is the current, partial hour.
   const statusRates = useMemo(() => {
-    const ratesByHour = new Map<number, number>()
-    for (const point of props.perf?.recent_success_series ?? []) {
-      ratesByHour.set(point.ts, point.success_rate)
+    const rates = (props.perf?.recent_success_series ?? [])
+      .filter(
+        (point) =>
+          Number.isFinite(point.success_rate) &&
+          point.success_rate >= 0 &&
+          point.success_rate <= 100
+      )
+      .sort((left, right) => left.ts - right.ts)
+      .slice(-STATUS_SLOTS.length)
+      .map((point) => point.success_rate)
+    const fallbackRate = hasSuccessRate ? successRate : undefined
+    const baseline = rates[0] ?? fallbackRate
+    if (baseline == null) {
+      return Array<number | undefined>(STATUS_SLOTS.length).fill(undefined)
     }
-    return STATUS_SLOTS.map((slot) => {
-      const hourStart = currentHourStart - (23 - slot) * 3600
-      return ratesByHour.get(hourStart)
-    })
-  }, [currentHourStart, props.perf?.recent_success_series])
+    return [
+      ...Array<number>(STATUS_SLOTS.length - rates.length).fill(baseline),
+      ...rates,
+    ]
+  }, [hasSuccessRate, props.perf?.recent_success_series, successRate])
 
   return (
     <div

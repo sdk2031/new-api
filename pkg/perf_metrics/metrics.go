@@ -197,6 +197,39 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 	return result, nil
 }
 
+func QueryLatestSummaryBefore(hours int, groups []string) (*ModelSummary, error) {
+	if hours <= 0 {
+		hours = 24
+	}
+	if hours > 24*30 {
+		hours = 24 * 30
+	}
+	beforeTs := time.Now().Unix() - int64(hours)*3600
+	rows, err := model.GetLatestPerfMetricsSummaryBucketsBefore(beforeTs, groups)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+
+	total := counters{}
+	buckets := map[int64]counters{}
+	for _, row := range rows {
+		value := counters{
+			requestCount:   row.RequestCount,
+			successCount:   row.SuccessCount,
+			totalLatencyMs: row.TotalLatencyMs,
+			outputTokens:   row.OutputTokens,
+			generationMs:   row.GenerationMs,
+		}
+		total = addCounters(total, value)
+		buckets[row.BucketTs] = addCounters(buckets[row.BucketTs], value)
+	}
+	if total.requestCount == 0 {
+		return nil, nil
+	}
+	summary := buildModelSummary("", total, buckets)
+	return &summary, nil
+}
+
 func buildModelSummary(name string, total counters, buckets map[int64]counters) ModelSummary {
 	avgLatency := total.totalLatencyMs / total.requestCount
 	successRate := float64(total.successCount) / float64(total.requestCount) * 100

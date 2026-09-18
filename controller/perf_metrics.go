@@ -43,8 +43,28 @@ func GetPerfMetricsSummary(c *gin.Context) {
 	}
 	providerModels := getProviderPerformanceModels(c.Request.Context(), activeGroups, hours)
 	result.Models = mergeProviderPerformanceModels(result.Models, providerModels)
-	if requestedGroup != "" && result.Aggregate == nil {
-		result.Aggregate = aggregateProviderPerformanceModels(providerModels)
+	if requestedGroup != "" {
+		providerAggregate := aggregateProviderPerformanceModels(providerModels)
+		if result.Aggregate == nil && providerAggregate != nil {
+			result.Aggregate = providerAggregate
+		} else {
+			baseline, baselineErr := perfmetrics.QueryLatestSummaryBefore(hours, activeGroups)
+			if baselineErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"success": false,
+					"message": baselineErr.Error(),
+				})
+				return
+			}
+			if result.Aggregate == nil {
+				result.Aggregate = baseline
+			} else if baseline != nil && len(baseline.RecentIntervalSeries) > 0 {
+				result.Aggregate.RecentIntervalSeries = append(
+					baseline.RecentIntervalSeries,
+					result.Aggregate.RecentIntervalSeries...,
+				)
+			}
+		}
 	}
 	result.Groups = groupInfo
 
