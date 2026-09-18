@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -114,9 +115,10 @@ func getVisiblePerfMetricGroups(c *gin.Context) ([]perfmetrics.GroupSummaryInfo,
 		}
 
 		groupInfo = append(groupInfo, perfmetrics.GroupSummaryInfo{
-			Group:     group,
-			Ratio:     service.GetUserGroupRatio(userGroup, group),
-			SortOrder: ratio_setting.GetGroupOrder(group),
+			Group:             group,
+			Ratio:             service.GetUserGroupRatio(userGroup, group),
+			SortOrder:         ratio_setting.GetGroupOrder(group),
+			EnabledModelCount: len(model.GetGroupEnabledModels(group)),
 		})
 		visibleGroups[group] = struct{}{}
 	}

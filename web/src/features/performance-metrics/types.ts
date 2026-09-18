@@ -67,6 +67,7 @@ export type PerfGroupSummaryInfo = {
   group: string
   ratio: number
   sort_order: number
+  enabled_model_count?: number
 }
 
 export type PerfSummaryAllData = {

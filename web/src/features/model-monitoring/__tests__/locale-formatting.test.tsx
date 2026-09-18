@@ -27,6 +27,7 @@ import i18next from 'i18next'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { ModelMonitoring } from '..'
+import { ModelStatusHistory } from '../model-status-history'
 
 const refetch = vi.fn()
 
@@ -37,8 +38,18 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
     useQuery: () => ({
       data: {
         groups: [
-          { group: 'default', ratio: 0.2, sort_order: 10 },
-          { group: 'vip', ratio: 0.3, sort_order: 20 },
+          {
+            group: 'default',
+            ratio: 0.2,
+            sort_order: 10,
+            enabled_model_count: 3,
+          },
+          {
+            group: 'vip',
+            ratio: 0.3,
+            sort_order: 20,
+            enabled_model_count: 2,
+          },
         ],
         metrics: [
           {
@@ -49,15 +60,18 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
               success_rate: 99,
               avg_tps: 20,
               request_count: 1000,
-              recent_interval_series: [
-                {
-                  ts: Math.floor(Date.now() / 1_000 / 300) * 300,
+              recent_interval_series: Array.from(
+                { length: 30 },
+                (_, index) => ({
+                  ts:
+                    Math.floor(Date.now() / 1_000 / 300) * 300 -
+                    (29 - index) * 300,
                   success_rate: 99,
                   avg_latency_ms: 250,
                   avg_tps: 20,
                   request_count: 12,
-                },
-              ],
+                })
+              ),
             },
           },
         ],
@@ -97,6 +111,41 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
   expect(screen.getByText('20.0 t/s')).toBeInTheDocument()
   expect(screen.getAllByText(i18next.t('Normal')).length).toBeGreaterThan(0)
 
+  const monitoringGrid = document.querySelector('[data-slot="monitoring-grid"]')
+  expect(monitoringGrid).toHaveClass(
+    'sm:grid-cols-[repeat(auto-fill,minmax(18rem,1fr))]'
+  )
+  const summary = screen.getByText(i18next.t('Average availability'))
+    .parentElement?.parentElement
+  if (!(summary instanceof HTMLElement)) {
+    throw new Error('Group monitoring summary was not rendered')
+  }
+  const normalSummary = within(summary).getByText(i18next.t('Normal'))
+    .parentElement
+  const fluctuatingSummary = within(summary).getByText(
+    i18next.t('Fluctuating')
+  ).parentElement
+  const abnormalSummary = within(summary).getByText(i18next.t('Abnormal'))
+    .parentElement
+  expect(normalSummary?.lastElementChild).toHaveClass('text-emerald-500')
+  expect(fluctuatingSummary?.lastElementChild).toHaveClass('text-amber-600')
+  expect(abnormalSummary?.lastElementChild).toHaveClass('text-red-600')
+  const searchSummaryRow = document.querySelector(
+    '[data-slot="monitoring-search-summary"]'
+  )
+  expect(searchSummaryRow).toContainElement(
+    screen.getByPlaceholderText(i18next.t('Search groups'))
+  )
+  expect(searchSummaryRow).toContainElement(summary)
+
+  const vipGroupCard = screen
+    .getByText('vip')
+    .closest('[data-slot="card"]')
+  if (!(vipGroupCard instanceof HTMLElement)) {
+    throw new Error('VIP group card was not rendered')
+  }
+  expect(within(vipGroupCard).getByText(i18next.t('Normal'))).toBeInTheDocument()
+
   const defaultGroupCard = screen
     .getByText('default')
     .closest('[data-slot="card"]')
@@ -104,11 +153,10 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
     throw new Error('Default group card was not rendered')
   }
   const history = within(defaultGroupCard).getByRole('img', {
-    name: i18next.t(
-      'Recent performance samples at five-minute intervals; gray bars indicate missing data.'
-    ),
+    name: i18next.t('Latest 24 performance records at five-minute intervals.'),
   })
   const bars = history.querySelectorAll('[data-slot="tooltip-trigger"]')
+  expect(bars).toHaveLength(24)
   fireEvent.focus(bars.item(bars.length - 1))
 
   await waitFor(() => {
@@ -138,4 +186,43 @@ it('finds groups by their effective price', async () => {
   await waitFor(() => {
     expect(screen.queryByText('¥2 / USD')).not.toBeInTheDocument()
   })
+})
+
+it('updates the active five-minute record color without adding a block', () => {
+  const timestamp = Math.floor(Date.now() / 1_000 / 300) * 300
+  const { container, rerender } = render(
+    <ModelStatusHistory
+      series={[
+        {
+          ts: timestamp,
+          success_rate: 100,
+          avg_latency_ms: 200,
+          avg_tps: 10,
+          request_count: 1,
+        },
+      ]}
+    />
+  )
+
+  let bars = container.querySelectorAll('[data-slot="tooltip-trigger"]')
+  expect(bars).toHaveLength(1)
+  expect(bars.item(0)).toHaveClass('bg-emerald-500')
+
+  rerender(
+    <ModelStatusHistory
+      series={[
+        {
+          ts: timestamp,
+          success_rate: 50,
+          avg_latency_ms: 400,
+          avg_tps: 5,
+          request_count: 2,
+        },
+      ]}
+    />
+  )
+
+  bars = container.querySelectorAll('[data-slot="tooltip-trigger"]')
+  expect(bars).toHaveLength(1)
+  expect(bars.item(0)).toHaveClass('bg-red-500')
 })

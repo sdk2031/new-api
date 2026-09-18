@@ -71,9 +71,10 @@ type ModelSummary struct {
 }
 
 type GroupSummaryInfo struct {
-	Group     string  `json:"group"`
-	Ratio     float64 `json:"ratio"`
-	SortOrder int     `json:"sort_order"`
+	Group             string  `json:"group"`
+	Ratio             float64 `json:"ratio"`
+	SortOrder         int     `json:"sort_order"`
+	EnabledModelCount int     `json:"enabled_model_count"`
 }
 
 type SummaryAllResult struct {

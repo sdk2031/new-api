@@ -59,10 +59,10 @@ import {
   formatLatency,
   formatThroughput,
   formatUptimePct,
-  getSuccessRateDotClass,
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
 import type {
+  PerformanceIntervalPoint,
   PerfGroupSummaryInfo,
   PerfModelSummary,
 } from '@/features/performance-metrics/types'
@@ -74,9 +74,10 @@ import { cn } from '@/lib/utils'
 import { ModelStatusHistory } from './model-status-history'
 
 const PERFORMANCE_WINDOW_HOURS = 24
-const REFRESH_INTERVAL_MS = 60_000
+const REFRESH_INTERVAL_MS = 30_000
 const NORMAL_RATE_MIN = 90
 const FLUCTUATING_RATE_MIN = 70
+const RECENT_STATUS_MAX_AGE_SECONDS = 15 * 60
 
 type StatusFilter = 'all' | 'normal' | 'fluctuating' | 'abnormal' | 'unknown'
 
@@ -94,16 +95,33 @@ type MonitoringRow = {
   group: string
   sortOrder: number
   effectivePrice: number
+  hasEnabledModels: boolean
   perf?: PerfModelSummary
   status: Exclude<StatusFilter, 'all'>
 }
 
 function getMonitoringStatus(
-  perf: PerfModelSummary | undefined
+  perf: PerfModelSummary | undefined,
+  hasEnabledModels: boolean
 ): MonitoringRow['status'] {
-  if (!perf || !Number.isFinite(perf.success_rate)) return 'unknown'
-  if (perf.success_rate >= NORMAL_RATE_MIN) return 'normal'
-  if (perf.success_rate >= FLUCTUATING_RATE_MIN) return 'fluctuating'
+  if (!hasEnabledModels) return 'abnormal'
+
+  const latestPoint = (perf?.recent_interval_series ?? []).reduce<
+    PerformanceIntervalPoint | undefined
+  >((latest, point) => {
+    if (!Number.isFinite(point.success_rate)) return latest
+    if (!latest || point.ts > latest.ts) return point
+    return latest
+  }, undefined)
+  const nowSeconds = Math.floor(Date.now() / 1_000)
+  if (
+    !latestPoint ||
+    latestPoint.ts < nowSeconds - RECENT_STATUS_MAX_AGE_SECONDS
+  ) {
+    return 'normal'
+  }
+  if (latestPoint.success_rate >= NORMAL_RATE_MIN) return 'normal'
+  if (latestPoint.success_rate >= FLUCTUATING_RATE_MIN) return 'fluctuating'
   return 'abnormal'
 }
 
@@ -170,12 +188,14 @@ export function ModelMonitoring() {
     return (metricsQuery.data?.groups ?? [])
       .map((groupInfo) => {
         const perf = perfMap.get(groupInfo.group)
+        const hasEnabledModels = (groupInfo.enabled_model_count ?? 1) > 0
         return {
           group: groupInfo.group,
           sortOrder: groupInfo.sort_order ?? 0,
           effectivePrice: groupInfo.ratio * priceRate,
+          hasEnabledModels,
           perf,
-          status: getMonitoringStatus(perf),
+          status: getMonitoringStatus(perf, hasEnabledModels),
         }
       })
       .sort((left, right) => {
@@ -236,28 +256,9 @@ export function ModelMonitoring() {
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>
-        <span className='flex flex-wrap items-center gap-x-3 gap-y-1 whitespace-normal'>
-          <span className='flex items-center gap-2'>
-            <HeartPulse className='size-5 text-emerald-500' />
-            {t('Group monitoring')}
-          </span>
-          <span className='text-muted-foreground flex flex-wrap items-center gap-x-2 text-[11px] font-normal tabular-nums'>
-            <span>
-              {t('Normal')} {summary.normal.toLocaleString(locale)}
-            </span>
-            <span>
-              {t('Fluctuating')} {summary.fluctuating.toLocaleString(locale)}
-            </span>
-            <span>
-              {t('Abnormal')} {summary.abnormal.toLocaleString(locale)}
-            </span>
-            <span>
-              {t('No data')} {summary.unknown.toLocaleString(locale)}
-            </span>
-            <span>
-              {t('Average availability')} {formatUptimePct(summary.average)}
-            </span>
-          </span>
+        <span className='flex items-center gap-2'>
+          <HeartPulse className='size-5 text-emerald-500' />
+          {t('Group monitoring')}
         </span>
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
@@ -292,15 +293,55 @@ export function ModelMonitoring() {
             )}
           </p>
 
-          <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
-            <div className='relative w-full sm:max-w-sm'>
-              <Search className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2' />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t('Search groups')}
-                className='pl-8'
-              />
+          <div className='flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between'>
+            <div
+              data-slot='monitoring-search-summary'
+              className='flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center'
+            >
+              <div className='relative w-full sm:max-w-sm sm:shrink-0'>
+                <Search className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2' />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={t('Search groups')}
+                  className='pl-8'
+                />
+              </div>
+              <span
+                data-slot='monitoring-summary'
+                className='text-muted-foreground flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px] leading-none font-normal tabular-nums'
+              >
+                <span className='flex items-baseline gap-1'>
+                  <span>{t('Normal')}</span>
+                  <span className='text-emerald-500 dark:text-emerald-400'>
+                    {summary.normal.toLocaleString(locale)}
+                  </span>
+                </span>
+                <span className='flex items-baseline gap-1'>
+                  <span>{t('Fluctuating')}</span>
+                  <span className='text-amber-600 dark:text-amber-400'>
+                    {summary.fluctuating.toLocaleString(locale)}
+                  </span>
+                </span>
+                <span className='flex items-baseline gap-1'>
+                  <span>{t('Abnormal')}</span>
+                  <span className='text-red-600 dark:text-red-400'>
+                    {summary.abnormal.toLocaleString(locale)}
+                  </span>
+                </span>
+                <span className='flex items-baseline gap-1'>
+                  <span>{t('No data')}</span>
+                  <span className='text-muted-foreground'>
+                    {summary.unknown.toLocaleString(locale)}
+                  </span>
+                </span>
+                <span className='flex items-baseline gap-1'>
+                  <span>{t('Average availability')}</span>
+                  <span className={getSuccessRateTextClass(summary.average)}>
+                    {formatUptimePct(summary.average)}
+                  </span>
+                </span>
+              </span>
             </div>
             <div
               role='group'
@@ -353,9 +394,13 @@ function MonitoringCard(props: { row: MonitoringRow }) {
   if (props.row.status === 'normal') statusLabel = t('Normal')
   if (props.row.status === 'fluctuating') statusLabel = t('Fluctuating')
   if (props.row.status === 'abnormal') statusLabel = t('Abnormal')
+  let statusDotClass = 'bg-muted-foreground/40'
+  if (props.row.status === 'normal') statusDotClass = 'bg-emerald-500'
+  if (props.row.status === 'fluctuating') statusDotClass = 'bg-amber-500'
+  if (props.row.status === 'abnormal') statusDotClass = 'bg-red-500'
 
   return (
-    <Card className='w-full gap-3 rounded-lg py-3 sm:max-w-[22rem]'>
+    <Card className='w-full min-w-0 gap-3 rounded-lg py-3'>
       <CardHeader className='grid-cols-[1fr_auto] px-3'>
         <div className='flex min-w-0 items-center gap-2.5'>
           <div className='bg-muted flex size-9 shrink-0 items-center justify-center rounded-lg'>
@@ -373,12 +418,7 @@ function MonitoringCard(props: { row: MonitoringRow }) {
         <CardAction>
           <Badge variant='outline' className='gap-1.5'>
             <span
-              className={cn(
-                'size-1.5 rounded-full',
-                props.row.status === 'unknown'
-                  ? 'bg-muted-foreground/40'
-                  : getSuccessRateDotClass(successRate)
-              )}
+              className={cn('size-1.5 rounded-full', statusDotClass)}
             />
             {statusLabel}
           </Badge>
@@ -439,7 +479,10 @@ function MonitoringResults(props: { loading: boolean; rows: MonitoringRow[] }) {
 
   if (props.rows.length > 0) {
     return (
-      <div className='grid grid-cols-1 justify-start gap-3 sm:grid-cols-[repeat(auto-fill,minmax(18rem,22rem))]'>
+      <div
+        data-slot='monitoring-grid'
+        className='grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(18rem,1fr))]'
+      >
         {props.rows.map((row) => (
           <MonitoringCard key={row.group} row={row} />
         ))}
@@ -464,12 +507,12 @@ function MonitoringResults(props: { loading: boolean; rows: MonitoringRow[] }) {
 
 function MonitoringSkeleton() {
   return (
-    <div className='grid grid-cols-1 justify-start gap-3 sm:grid-cols-[repeat(auto-fill,minmax(18rem,22rem))]'>
+    <div
+      data-slot='monitoring-grid'
+      className='grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(18rem,1fr))]'
+    >
       {Array.from({ length: 6 }, (_, index) => (
-        <Card
-          key={index}
-          className='w-full gap-3 rounded-lg py-3 sm:max-w-[22rem]'
-        >
+        <Card key={index} className='w-full min-w-0 gap-3 rounded-lg py-3'>
           <CardHeader className='px-3'>
             <div className='flex items-center gap-2.5'>
               <Skeleton className='size-9' />
