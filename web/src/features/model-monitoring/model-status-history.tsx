@@ -77,17 +77,23 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
         avg_tps: fallbackMetrics?.avg_tps ?? 0,
         request_count: 0,
       }
-      return Array.from({ length: MONITORING_SLOT_COUNT }, (_, slot) => ({
-        metrics: fallbackPoint,
-        synthetic: true,
-        slot: -(slot + 1),
-      }))
+      return [
+        ...Array.from(
+          { length: MONITORING_SLOT_COUNT - 1 },
+          (_, slot) => ({
+            metrics: undefined,
+            synthetic: true,
+            slot: -(slot + 1),
+          })
+        ),
+        { metrics: fallbackPoint, synthetic: true, slot: 0 },
+      ]
     }
 
     const padding = Array.from(
-      { length: MONITORING_SLOT_COUNT - validPoints.length },
+      { length: Math.max(0, MONITORING_SLOT_COUNT - validPoints.length) },
       (_, slot) => ({
-        metrics: validPoints[0].metrics,
+        metrics: undefined,
         synthetic: true,
         slot: -(slot + 1),
       })

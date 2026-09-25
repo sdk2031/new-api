@@ -53,6 +53,11 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
             ratio: 0.25,
             sort_order: 15,
           },
+          {
+            group: 'provider-empty',
+            ratio: 0.4,
+            sort_order: 5,
+          },
         ],
         metrics: [
           {
@@ -83,6 +88,25 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
               model_name: '',
               avg_latency_ms: 1200,
               success_rate: 95,
+              avg_tps: 0,
+              provider_fallback: true,
+              recent_interval_series: [
+                {
+                  ts: 1,
+                  success_rate: 95,
+                  avg_latency_ms: 1200,
+                  avg_tps: 0,
+                  request_count: 0,
+                },
+              ],
+            },
+          },
+          {
+            group: 'provider-empty',
+            perf: {
+              model_name: '',
+              avg_latency_ms: 0,
+              success_rate: 0,
               avg_tps: 0,
               provider_fallback: true,
             },
@@ -116,7 +140,7 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
     [...document.querySelectorAll('[data-slot="card-title"]')].map(
       (element) => element.textContent
     )
-  ).toEqual(['vip', 'provider', 'default'])
+  ).toEqual(['vip', 'provider', 'default', 'provider-empty'])
   expect(screen.getByText('¥2 / USD')).toBeInTheDocument()
   expect(screen.queryByText('1,000')).not.toBeInTheDocument()
   expect(screen.queryByText('0.2x')).not.toBeInTheDocument()
@@ -191,8 +215,26 @@ it('renders compact group metrics and five-minute details in zhCN', async () => 
   })
   expect(
     providerHistory.querySelectorAll('[data-slot="status-empty"]')
-  ).toHaveLength(0)
-  expect(providerHistory.querySelectorAll('.bg-emerald-400')).toHaveLength(24)
+  ).toHaveLength(23)
+  expect(providerHistory.querySelectorAll('.bg-emerald-400')).toHaveLength(1)
+
+  const emptyProviderCard = screen
+    .getByText('provider-empty')
+    .closest('[data-slot="card"]')
+  if (!(emptyProviderCard instanceof HTMLElement)) {
+    throw new Error('Empty provider group card was not rendered')
+  }
+  expect(
+    within(emptyProviderCard).getByText(i18next.t('No data'))
+  ).toBeInTheDocument()
+  expect(within(emptyProviderCard).getByText('—')).toBeInTheDocument()
+  expect(
+    within(emptyProviderCard).getByRole('img', {
+      name: i18next.t(
+        'Recent performance samples at five-minute intervals; gray bars indicate missing data.'
+      ),
+    }).querySelectorAll('[data-slot="status-empty"]')
+  ).toHaveLength(24)
 
   const defaultGroupCard = screen
     .getByText('default')
@@ -284,7 +326,7 @@ it('keeps a single active record compact and updates its color in place', () => 
   expect(bars.item(0)).toHaveClass('bg-red-500')
 })
 
-it('compacts recent active intervals and fills the leading slots', () => {
+it('shows only observed intervals and leaves leading slots empty', () => {
   const timestamp = Math.floor(Date.now() / 1_000 / 300) * 300
   const { container } = render(
     <ModelStatusHistory
@@ -328,7 +370,7 @@ it('compacts recent active intervals and fills the leading slots', () => {
   expect(bars.item(2)).toHaveClass('bg-red-500')
   expect(bars.item(3)).toHaveClass('bg-emerald-500')
   expect(container.querySelectorAll('[data-slot="status-empty"]')).toHaveLength(
-    0
+    20
   )
   expect(container.querySelectorAll('[aria-hidden="true"]')).toHaveLength(20)
 })

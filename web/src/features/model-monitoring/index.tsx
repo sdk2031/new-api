@@ -98,16 +98,10 @@ type MonitoringRow = {
   status: Exclude<StatusFilter, 'all'>
 }
 
-function getMonitoringStatus(
+function getLatestMonitoringPoint(
   perf: PerfModelSummary | undefined
-): MonitoringRow['status'] {
-  if (perf?.provider_fallback) {
-    if (!Number.isFinite(perf.success_rate)) return 'unknown'
-    if (perf.success_rate >= NORMAL_RATE_MIN) return 'normal'
-    if (perf.success_rate >= FLUCTUATING_RATE_MIN) return 'fluctuating'
-    return 'abnormal'
-  }
-  const latestPoint = (perf?.recent_interval_series ?? []).reduce<
+): PerformanceIntervalPoint | undefined {
+  return (perf?.recent_interval_series ?? []).reduce<
     PerformanceIntervalPoint | undefined
   >((latest, point) => {
     if (
@@ -120,6 +114,18 @@ function getMonitoringStatus(
     if (!latest || point.ts > latest.ts) return point
     return latest
   }, undefined)
+}
+
+function getMonitoringStatus(
+  perf: PerfModelSummary | undefined
+): MonitoringRow['status'] {
+  const latestPoint = getLatestMonitoringPoint(perf)
+
+  // Provider summaries may contain a model with a default success rate even
+  // when the provider has never returned an actual performance interval.
+  // Do not turn that empty response into a false abnormal status.
+  if (perf?.provider_fallback && !latestPoint) return 'unknown'
+
   const successRate = latestPoint?.success_rate ?? perf?.success_rate
   if (successRate == null || !Number.isFinite(successRate)) return 'unknown'
   if (successRate >= NORMAL_RATE_MIN) return 'normal'
@@ -387,8 +393,9 @@ function MonitoringCard(props: { row: MonitoringRow }) {
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const perf = props.row.perf
   const hasMonitoringData = props.row.status !== 'unknown'
+  const latestPoint = getLatestMonitoringPoint(perf)
   const successRate = hasMonitoringData
-    ? (perf?.success_rate ?? Number.NaN)
+    ? (latestPoint?.success_rate ?? perf?.success_rate ?? Number.NaN)
     : Number.NaN
   const effectivePrice = new Intl.NumberFormat(locale, {
     maximumFractionDigits: 6,
@@ -467,7 +474,7 @@ function MonitoringCard(props: { row: MonitoringRow }) {
 
         <ModelStatusHistory
           series={perf?.recent_interval_series}
-          fallbackMetrics={perf}
+          fallbackMetrics={perf?.provider_fallback ? undefined : perf}
           className='h-6 w-full gap-1'
           barClassName='w-full rounded-sm'
         />

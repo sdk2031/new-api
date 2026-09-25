@@ -45,25 +45,29 @@ func GetPerfMetricsSummary(c *gin.Context) {
 	result.Models = mergeProviderPerformanceModels(result.Models, providerModels)
 	if requestedGroup != "" {
 		providerAggregate := aggregateProviderPerformanceModels(providerModels)
-		if result.Aggregate == nil && providerAggregate != nil {
+		baseline, baselineErr := perfmetrics.QueryLatestSummaryBefore(hours, activeGroups)
+		if baselineErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": baselineErr.Error(),
+			})
+			return
+		}
+		if result.Aggregate == nil {
 			result.Aggregate = providerAggregate
-		} else {
-			baseline, baselineErr := perfmetrics.QueryLatestSummaryBefore(hours, activeGroups)
-			if baselineErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"success": false,
-					"message": baselineErr.Error(),
-				})
-				return
-			}
-			if result.Aggregate == nil {
+			if providerAggregate == nil || len(providerAggregate.RecentIntervalSeries) == 0 {
 				result.Aggregate = baseline
-			} else if baseline != nil && len(baseline.RecentIntervalSeries) > 0 {
+			} else if baseline != nil {
 				result.Aggregate.RecentIntervalSeries = append(
 					baseline.RecentIntervalSeries,
 					result.Aggregate.RecentIntervalSeries...,
 				)
 			}
+		} else if baseline != nil && len(baseline.RecentIntervalSeries) > 0 {
+			result.Aggregate.RecentIntervalSeries = append(
+				baseline.RecentIntervalSeries,
+				result.Aggregate.RecentIntervalSeries...,
+			)
 		}
 	}
 	result.Groups = groupInfo
