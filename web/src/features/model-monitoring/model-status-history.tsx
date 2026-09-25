@@ -35,7 +35,6 @@ import { cn } from '@/lib/utils'
 
 interface ModelStatusHistoryProps extends React.HTMLAttributes<HTMLDivElement> {
   series?: PerformanceIntervalPoint[]
-  fallbackMetrics?: Omit<PerformanceIntervalPoint, 'ts' | 'request_count'>
   barClassName?: string
 }
 
@@ -49,7 +48,7 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
 ) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
-  const { series, fallbackMetrics, barClassName, className, ...rest } = props
+  const { series, barClassName, className, ...rest } = props
   const statusPoints = useMemo(() => {
     const validPoints = (series ?? [])
       .filter(
@@ -60,46 +59,16 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
       )
       .sort((left, right) => left.ts - right.ts)
       .slice(-MONITORING_SLOT_COUNT)
-      .map((metrics) => ({ metrics, synthetic: false, slot: metrics.ts }))
-    if (validPoints.length === 0) {
-      const rate = fallbackMetrics?.success_rate
-      if (rate == null || !Number.isFinite(rate) || rate < 0 || rate > 100) {
-        return Array.from({ length: MONITORING_SLOT_COUNT }, (_, slot) => ({
-          metrics: undefined,
-          synthetic: true,
-          slot: -(slot + 1),
-        }))
-      }
-      const fallbackPoint: PerformanceIntervalPoint = {
-        ts: 0,
-        success_rate: rate,
-        avg_latency_ms: fallbackMetrics?.avg_latency_ms ?? 0,
-        avg_tps: fallbackMetrics?.avg_tps ?? 0,
-        request_count: 0,
-      }
-      return [
-        ...Array.from(
-          { length: MONITORING_SLOT_COUNT - 1 },
-          (_, slot) => ({
-            metrics: undefined,
-            synthetic: true,
-            slot: -(slot + 1),
-          })
-        ),
-        { metrics: fallbackPoint, synthetic: true, slot: 0 },
-      ]
-    }
-
+      .map((metrics) => ({ metrics, slot: metrics.ts }))
     const padding = Array.from(
       { length: Math.max(0, MONITORING_SLOT_COUNT - validPoints.length) },
       (_, slot) => ({
         metrics: undefined,
-        synthetic: true,
         slot: -(slot + 1),
       })
     )
     return [...padding, ...validPoints]
-  }, [fallbackMetrics, series])
+  }, [series])
   const timeFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
@@ -137,19 +106,6 @@ export const ModelStatusHistory = memo(function ModelStatusHistory(
         }
 
         const rate = point.metrics.success_rate
-        if (point.synthetic) {
-          return (
-            <span
-              key={`synthetic-${point.slot}`}
-              aria-hidden='true'
-              className={cn(
-                'h-full w-full rounded-xs',
-                getSuccessRateDotClass(rate),
-                barClassName
-              )}
-            />
-          )
-        }
         let statusLabel = t('No data')
         if (rate >= NORMAL_RATE_MIN) statusLabel = t('Normal')
         else if (rate >= FLUCTUATING_RATE_MIN) {

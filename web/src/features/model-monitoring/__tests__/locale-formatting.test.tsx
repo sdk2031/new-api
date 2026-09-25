@@ -96,7 +96,7 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
                   success_rate: 95,
                   avg_latency_ms: 1200,
                   avg_tps: 0,
-                  request_count: 0,
+                  request_count: 1,
                 },
               ],
             },
@@ -324,6 +324,22 @@ it('keeps a single active record compact and updates its color in place', () => 
   bars = container.querySelectorAll('[data-slot="tooltip-trigger"]')
   expect(bars).toHaveLength(1)
   expect(bars.item(0)).toHaveClass('bg-red-500')
+})
+
+it('does not invent a red interval from a summary without history', () => {
+  const { container } = render(
+    <ModelStatusHistory
+      series={[]}
+      aria-label='history-without-samples'
+    />
+  )
+
+  expect(
+    container.querySelectorAll('[data-slot="tooltip-trigger"]')
+  ).toHaveLength(0)
+  expect(
+    container.querySelectorAll('[data-slot="status-empty"]')
+  ).toHaveLength(24)
 })
 
 it('shows only observed intervals and leaves leading slots empty', () => {

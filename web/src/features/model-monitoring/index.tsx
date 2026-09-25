@@ -120,14 +120,9 @@ function getMonitoringStatus(
   perf: PerfModelSummary | undefined
 ): MonitoringRow['status'] {
   const latestPoint = getLatestMonitoringPoint(perf)
+  if (!latestPoint) return 'unknown'
 
-  // Provider summaries may contain a model with a default success rate even
-  // when the provider has never returned an actual performance interval.
-  // Do not turn that empty response into a false abnormal status.
-  if (perf?.provider_fallback && !latestPoint) return 'unknown'
-
-  const successRate = latestPoint?.success_rate ?? perf?.success_rate
-  if (successRate == null || !Number.isFinite(successRate)) return 'unknown'
+  const successRate = latestPoint.success_rate
   if (successRate >= NORMAL_RATE_MIN) return 'normal'
   if (successRate >= FLUCTUATING_RATE_MIN) return 'fluctuating'
   return 'abnormal'
@@ -395,7 +390,7 @@ function MonitoringCard(props: { row: MonitoringRow }) {
   const hasMonitoringData = props.row.status !== 'unknown'
   const latestPoint = getLatestMonitoringPoint(perf)
   const successRate = hasMonitoringData
-    ? (latestPoint?.success_rate ?? perf?.success_rate ?? Number.NaN)
+    ? (latestPoint?.success_rate ?? Number.NaN)
     : Number.NaN
   const effectivePrice = new Intl.NumberFormat(locale, {
     maximumFractionDigits: 6,
@@ -474,7 +469,6 @@ function MonitoringCard(props: { row: MonitoringRow }) {
 
         <ModelStatusHistory
           series={perf?.recent_interval_series}
-          fallbackMetrics={perf?.provider_fallback ? undefined : perf}
           className='h-6 w-full gap-1'
           barClassName='w-full rounded-sm'
         />
