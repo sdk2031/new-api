@@ -27,13 +27,15 @@ func TestPlaygroundImageStoresURLAndBase64Privately(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 	body, err := common.Marshal(map[string]any{"data": []upstreamPlaygroundImage{
-		{URL: upstream.URL + "/image?signature=internal"}, {Base64: testPlaygroundPNG},
+		{URL: upstream.URL + "/image?signature=internal"},
+		{Base64: testPlaygroundPNG},
+		{Base64: upstream.URL + "/fdai-image?signature=internal"},
 	}})
 	require.NoError(t, err)
 
 	results, err := storePlaygroundImages(t.Context(), 17, body, upstream.Client())
 	require.NoError(t, err)
-	require.Len(t, results, 2)
+	require.Len(t, results, 3)
 	for _, result := range results {
 		name, local := strings.CutPrefix(result.URL, "/pg/images/result/")
 		require.True(t, local)

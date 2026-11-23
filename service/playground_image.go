@@ -96,11 +96,19 @@ func savePlaygroundImage(ctx context.Context, dir string, image upstreamPlaygrou
 	if err := ctx.Err(); err != nil {
 		return "", 0, err
 	}
+	imageURL := image.URL
+	encoded := strings.TrimSpace(image.Base64)
+	// Some OpenAI-compatible providers put the image URL in b64_json.
+	if scheme, _, found := strings.Cut(encoded, "://"); found &&
+		(strings.EqualFold(scheme, "http") || strings.EqualFold(scheme, "https")) {
+		imageURL = encoded
+		encoded = ""
+	}
 	var source io.Reader
-	if image.Base64 != "" {
-		source = base64.NewDecoder(base64.StdEncoding, strings.NewReader(image.Base64))
+	if encoded != "" {
+		source = base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
 	} else {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, image.URL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 		if err != nil || req.URL.Hostname() == "" || req.URL.User != nil || (req.URL.Scheme != "http" && req.URL.Scheme != "https") {
 			return "", 0, errors.New("invalid image URL")
 		}
