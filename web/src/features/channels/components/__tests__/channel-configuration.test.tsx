@@ -1301,6 +1301,42 @@ test('restoring routing defaults clears the configured indicator for both the bl
   expect(within(block).getByRole('img', { name: 'Configured' })).toBeVisible()
 })
 
+test.each([false, true])(
+  'updates FDAI image compatibility from %s without changing channel type, models, or address',
+  async (bound) => {
+    if (bound) {
+      editingChannel = {
+        ...editingChannel,
+        setting: '{"task_plugin_key":"fdai-video"}',
+      }
+    }
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true } })
+    const user = userEvent.setup()
+    render(<ConfigurationHarness currentRow={editingChannel} />)
+    await screen.findByDisplayValue('Existing channel')
+    await user.click(screen.getByRole('tab', { name: /Request & Response/ }))
+    const toggle = screen.getByRole('switch', {
+      name: 'FDAI image compatibility',
+    })
+    expect(toggle).toHaveAttribute('aria-checked', String(bound))
+    await user.click(toggle)
+    await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+    await waitFor(() => expect(put).toHaveBeenCalledOnce())
+
+    const payload = put.mock.calls[0]?.[1] as { setting: string }
+    expect(payload).toMatchObject({
+      type: 1,
+      models: 'custom-model',
+      base_url: 'https://saved.example',
+    })
+    expect(JSON.parse(payload.setting).task_plugin_key).toBe(
+      bound ? undefined : 'fdai-video'
+    )
+  }
+)
+
 test('request processing configuration does not mark the network category as configured', async () => {
   editingChannel = {
     ...editingChannel,

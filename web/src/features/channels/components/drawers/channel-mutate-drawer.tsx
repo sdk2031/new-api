@@ -159,6 +159,7 @@ import { useChannelMutateForm } from '../../hooks/use-channel-mutate-form'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   CHANNEL_TYPE_ADVANCED_CUSTOM,
+  FDAI_IMAGE_PLUGIN_KEY,
   channelFormSchema,
   channelsQueryKeys,
   getAdvancedCustomStats,
@@ -267,6 +268,7 @@ const SENSITIVE_FORM_FIELDS = [
   'header_override',
   'settings',
   'setting',
+  'task_plugin_key',
   'advanced_custom',
   'is_enterprise_account',
   'vertex_key_type',
@@ -782,6 +784,7 @@ export function ChannelMutateDrawer({
           return
         }
         form.setValue('type', target.type, { shouldDirty: true })
+        form.setValue('task_plugin_key', '', { shouldDirty: true })
         if (!isEditing && !providerTarget && !form.getValues('name').trim()) {
           const label = CHANNEL_TYPE_OPTIONS.find(
             (option) => option.value === target.type
@@ -1665,6 +1668,36 @@ export function ChannelMutateDrawer({
               disabled={sensitiveLocked}
               checked={field.value}
               onCheckedChange={field.onChange}
+            />
+          </FormControl>
+        </FormItem>
+      )}
+    />
+  )
+
+  const fdaiImageFields = currentType === 1 && (
+    <FormField
+      control={form.control}
+      name='task_plugin_key'
+      render={({ field }) => (
+        <FormItem className='flex items-center justify-between gap-4 px-4 py-3'>
+          <div className='space-y-0.5'>
+            <FormLabel>{t('FDAI image compatibility')}</FormLabel>
+            <FormDescription>
+              {t(
+                'Use the enabled FDAI Video plugin to convert image links to Base64 on this channel only.'
+              )}
+            </FormDescription>
+          </div>
+          <FormControl>
+            <Switch
+              checked={field.value === FDAI_IMAGE_PLUGIN_KEY}
+              disabled={sensitiveLocked || !canBindTaskPlugin || isSubmitting}
+              onCheckedChange={(checked) =>
+                field.onChange(checked ? FDAI_IMAGE_PLUGIN_KEY : '')
+              }
+              onBlur={field.onBlur}
+              ref={field.ref}
             />
           </FormControl>
         </FormItem>
@@ -4193,6 +4226,7 @@ export function ChannelMutateDrawer({
                   disabled={sensitiveLocked || isSubmitting}
                 />
                 {formatFields}
+                {fdaiImageFields}
                 {ollamaOpenAIChatFields}
                 {thinkingFields}
                 {currentType !== CHANNEL_TYPE_ADVANCED_CUSTOM &&

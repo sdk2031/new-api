@@ -52,6 +52,8 @@ const SUPPORTED_PROXY_PROTOCOLS = new Set([
   'socks5h:',
 ])
 
+export const FDAI_IMAGE_PLUGIN_KEY = 'fdai-video'
+
 function isOptionalProxyURL(value: string | undefined): boolean {
   const trimmedValue = value?.trim() || ''
   if (!trimmedValue) return true
@@ -638,10 +640,7 @@ export function transformChannelToFormDefaults(
  */
 export function buildSettingJSON(formData: ChannelFormValues): string {
   const settingObj: Record<string, unknown> = {
-    task_plugin_key:
-      formData.type === CHANNEL_TYPE_TASK_PLUGIN
-        ? formData.task_plugin_key?.trim() || ''
-        : undefined,
+    task_plugin_key: getChannelTaskPluginKey(formData),
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,
     proxy: formData.proxy?.trim() || '',
@@ -669,6 +668,13 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   }
 
   return JSON.stringify(settingObj)
+}
+
+function getChannelTaskPluginKey(formData: ChannelFormValues) {
+  const key = formData.task_plugin_key?.trim() || ''
+  if (formData.type === CHANNEL_TYPE_TASK_PLUGIN) return key
+  if (formData.type === 1 && key === FDAI_IMAGE_PLUGIN_KEY) return key
+  return undefined
 }
 
 /**

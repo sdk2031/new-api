@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -67,8 +68,9 @@ func PlaygroundImage(c *gin.Context) {
 		return
 	}
 	if !w.tooLarge && w.status == http.StatusOK && !strings.HasPrefix(w.header.Get("Content-Type"), "text/event-stream") {
-		channelBaseURL := common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl)
-		images, err := service.StorePlaygroundImages(c.Request.Context(), c.GetInt("id"), channelBaseURL, w.body.Bytes())
+		channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
+		settings, _ := common.GetContextKeyType[dto.ChannelSettings](c, constant.ContextKeyChannelSetting)
+		images, err := service.StorePlaygroundImages(c.Request.Context(), c.GetInt("id"), channelType, settings.TaskPluginKey, w.body.Bytes())
 		if err == nil {
 			c.JSON(http.StatusOK, gin.H{"data": images})
 			return

@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,7 +28,7 @@ import (
 func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := readOpenAIImageResponse(info, resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
@@ -44,12 +45,48 @@ func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 
 	info.UpdateImageCount(gjson.GetBytes(responseBody, "data.#").Int())
 
-	// 写入新的 response body
-	service.IOCopyBytesGracefully(c, resp, responseBody)
+	rewritten, rewriteErr := normalizeFDAIImageResponse(c, info, responseBody)
+	if rewriteErr != nil {
+		return nil, rewriteErr
+	}
+	if rewritten != nil {
+		// Upstream entity headers no longer describe the rewritten body.
+		service.ShouldCopyUpstreamHeader(c, common.RequestIdKey, resp.Header.Values(common.RequestIdKey))
+		c.Header("Content-Type", "application/json")
+		c.Header("Cache-Control", "private, no-store")
+		service.IOCopyBytesGracefully(c, nil, rewritten)
+	} else {
+		service.IOCopyBytesGracefully(c, resp, responseBody)
+	}
 
 	normalizeOpenAIUsage(&usageResp.Usage)
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 	return &usageResp.Usage, nil
+}
+
+func readOpenAIImageResponse(info *relaycommon.RelayInfo, body io.Reader) ([]byte, error) {
+	if info != nil && info.ChannelMeta != nil &&
+		service.IsFDAIImageChannel(info.ChannelType, info.ChannelSetting.TaskPluginKey) {
+		body = io.LimitReader(body, service.MaxPlaygroundImageResponseBytes+1)
+		data, err := io.ReadAll(body)
+		if len(data) > service.MaxPlaygroundImageResponseBytes {
+			return nil, errors.New("image response exceeds size limit")
+		}
+		return data, err
+	}
+	return io.ReadAll(body)
+}
+
+func normalizeFDAIImageResponse(c *gin.Context, info *relaycommon.RelayInfo, body []byte) ([]byte, *types.NewAPIError) {
+	if info == nil || info.IsPlayground || info.ChannelMeta == nil {
+		return nil, nil
+	}
+	rewritten, err := service.NormalizeFDAIImageAPIResponse(c.Request.Context(), info.ChannelType, info.ChannelSetting.TaskPluginKey, body)
+	if err != nil {
+		logger.LogWarn(c, "FDAI image response normalization failed on channel %d", info.ChannelId)
+		return nil, types.NewOpenAIError(errors.New("Failed to normalize FDAI image response; check the channel plugin binding and image result"), types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+	}
+	return rewritten, nil
 }
 
 // normalizeOpenAIUsage maps the OpenAI Images usage shape (input_tokens /
@@ -218,7 +255,7 @@ func extractOpenAIImageStreamErrorMessage(data []byte) string {
 func openaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := readOpenAIImageResponse(info, resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
@@ -236,6 +273,13 @@ func openaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo,
 	normalizeOpenAIUsage(&usageResp.Usage)
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 
+	rewritten, rewriteErr := normalizeFDAIImageResponse(c, info, responseBody)
+	if rewriteErr != nil {
+		return nil, rewriteErr
+	}
+	if rewritten != nil {
+		responseBody = rewritten
+	}
 	imageCount := gjson.GetBytes(responseBody, "data.#").Int()
 	info.UpdateImageCount(imageCount)
 

@@ -130,6 +130,23 @@ export function parseTaskResult() { return {}; }
 	assert.Contains(t, recorder.Body.String(), `"success":false`)
 }
 
+func TestFDAIImageChannelBindingRequiresTaskPluginPermission(t *testing.T) {
+	setupTaskPluginBindChannelTest(t)
+	const setting = `{"task_plugin_key":"fdai-video"}`
+	body := fmt.Sprintf(`{"mode":"single","channel":{"type":1,"name":"fdai-images","key":"sk","models":"nano_banana_pro","group":"default","base_url":"https://example.com","setting":%q}}`, setting)
+	denied := postAddChannel(t, 2, common.RoleAdminUser, body)
+	require.Contains(t, denied.Body.String(), `"success":false`)
+
+	allowed := postAddChannel(t, 1, common.RoleRootUser, body)
+	require.Contains(t, allowed.Body.String(), `"success":true`)
+	var channel model.Channel
+	require.NoError(t, model.DB.Where("name = ?", "fdai-images").Take(&channel).Error)
+	assert.Equal(t, constant.ChannelTypeOpenAI, channel.Type)
+	assert.Equal(t, "fdai-video", channel.GetSetting().TaskPluginKey)
+	assert.Equal(t, "nano_banana_pro", channel.Models)
+	assert.Equal(t, "https://example.com", channel.GetBaseURL())
+}
+
 func TestAddChannelTaskPluginPersistsPluginDefaultBaseURLAndAuditsSource(t *testing.T) {
 	setupTaskPluginBindChannelTest(t)
 	for key, baseURLField := range map[string]string{"bind-default-url": `baseUrl: "http://10.0.0.5:8000/",`, "bind-no-default": ""} {

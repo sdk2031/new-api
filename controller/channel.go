@@ -716,6 +716,11 @@ func AddChannel(c *gin.Context) {
 		})
 		return
 	}
+	if service.IsFDAIImageChannel(addChannelRequest.Channel.Type, addChannelRequest.Channel.GetSetting().TaskPluginKey) &&
+		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.TaskPluginBind) {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
+		return
+	}
 
 	addChannelRequest.Channel.CreatedTime = common.GetTimestamp()
 	keys := make([]string, 0)
@@ -1117,6 +1122,21 @@ func UpdateChannel(c *gin.Context) {
 
 	if channelHasSensitiveChanges(&channel, originChannel, requestData) &&
 		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
+		return
+	}
+
+	channelType := channel.Type
+	if channelType == 0 {
+		channelType = originChannel.Type
+	}
+	originalPluginKey := originChannel.GetSetting().TaskPluginKey
+	pluginKey := originalPluginKey
+	if channel.Setting != nil {
+		pluginKey = channel.GetSetting().TaskPluginKey
+	}
+	if service.IsFDAIImageChannel(channelType, pluginKey) != service.IsFDAIImageChannel(originChannel.Type, originalPluginKey) &&
+		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.TaskPluginBind) {
 		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
 	}
@@ -1561,7 +1581,7 @@ func CopyChannel(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道信息失败，请稍后重试"})
 		return
 	}
-	if origin.Type == constant.ChannelTypeTaskPlugin &&
+	if (origin.Type == constant.ChannelTypeTaskPlugin || service.IsFDAIImageChannel(origin.Type, origin.GetSetting().TaskPluginKey)) &&
 		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.TaskPluginBind) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "task plugin channels require the task_plugin.bind permission"})
 		return

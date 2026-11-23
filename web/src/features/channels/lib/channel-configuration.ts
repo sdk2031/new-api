@@ -25,7 +25,11 @@ import {
   OPENAI_FIELD_PASSTHROUGH_TYPES,
 } from '../constants'
 import { CHANNEL_TYPE_ADVANCED_CUSTOM } from './advanced-custom'
-import { channelFormSchema, type ChannelFormValues } from './channel-form'
+import {
+  channelFormSchema,
+  FDAI_IMAGE_PLUGIN_KEY,
+  type ChannelFormValues,
+} from './channel-form'
 
 export type ChannelProviderTarget =
   | { kind: 'builtin'; type: number }
@@ -60,6 +64,7 @@ const CONFIGURATION_BLOCKS = {
       'thinking_to_content',
       'pass_through_body_enabled',
       'responses_websocket_enabled',
+      'task_plugin_key',
       'ollama_openai_chat',
       'system_prompt',
       'system_prompt_override',
@@ -150,6 +155,7 @@ export function getChannelConfigurationState(
       hasConfiguredJson(values.header_override),
     requestProcessing: Boolean(
       (values.type === 1 && values.force_format) ||
+      (values.type === 1 && values.task_plugin_key === FDAI_IMAGE_PLUGIN_KEY) ||
       values.thinking_to_content ||
       (values.type !== CHANNEL_TYPE_ADVANCED_CUSTOM &&
         values.pass_through_body_enabled) ||
