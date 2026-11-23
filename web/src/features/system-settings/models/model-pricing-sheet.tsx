@@ -324,10 +324,13 @@ export const ModelPricingEditorPanel = forwardRef<
       ),
     [pricingModels]
   )
-  const taskUsageSchema =
-    usageSchema ??
-    pluginVariants?.find((variant) => !variant.stale)?.usage_schema ??
-    usageSchemaByModel.get(watchedValues.name.trim())
+  const taskUsageSchema = pluginVariants?.some(
+    (variant) => variant.provider_only
+  )
+    ? undefined
+    : (usageSchema ??
+      pluginVariants?.find((variant) => !variant.stale)?.usage_schema ??
+      usageSchemaByModel.get(watchedValues.name.trim()))
   const taskUsageExamples =
     usageExamplesByModel.get(watchedValues.name.trim()) ??
     pluginVariants?.find((variant) => !variant.stale)?.usage_examples

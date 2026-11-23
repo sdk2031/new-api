@@ -88,7 +88,26 @@ type TaskUsagePricingEditorProps = {
   onRequestRuleExprChange: (next: string) => void
 }
 
-type EditorMode = 'visual' | 'raw'
+type EditorMode = 'visual' | 'raw' | 'duration'
+
+type DurationPrice = { interval: '1' | '12'; price: number }
+
+function parseDurationPrice(
+  expression: string,
+  field?: string
+): DurationPrice | null {
+  if (!field) return null
+  const match =
+    /^tier\("(?:base|duration)",\s*(?:ceil\((u\("[^"]+"\))\s*\/\s*12\)|(u\("[^"]+"\)))\s*\*\s*([\d.eE+-]+)\)$/.exec(
+      expression.trim()
+    )
+  if (!match || (match[1] ?? match[2]) !== `u(${JSON.stringify(field)})`) {
+    return null
+  }
+  const price = Number(match[3])
+  if (!Number.isFinite(price) || price < 0) return null
+  return { interval: match[1] ? '12' : '1', price }
+}
 
 type TaskBillingPreviewProps = {
   currency?: PricingCurrency
@@ -280,12 +299,31 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
   props: TaskUsagePricingEditorProps
 ) {
   const { t, i18n } = useTranslation()
-  const [editorMode, setEditorMode] = useState<EditorMode>(() =>
-    props.billingExpr &&
-    !tryParseTaskMatrixConfig(props.billingExpr, props.usageSchema)
+  const durationFields = getTaskNumberFields(props.usageSchema).filter(
+    ([, definition]) => definition.unit === 'second'
+  )
+  const durationField =
+    durationFields.length === 1 ? durationFields[0][0] : undefined
+  const [durationPrice, setDurationPrice] = useState<DurationPrice>(
+    () =>
+      parseDurationPrice(props.billingExpr, durationField) ?? {
+        interval: '1',
+        price: 0,
+      }
+  )
+  const [editorMode, setEditorMode] = useState<EditorMode>(() => {
+    if (
+      parseDurationPrice(props.billingExpr, durationField) &&
+      (props.billingExpr.trim().startsWith('tier("duration",') ||
+        durationPrice.interval === '12')
+    ) {
+      return 'duration'
+    }
+    return props.billingExpr &&
+      !tryParseTaskMatrixConfig(props.billingExpr, props.usageSchema)
       ? 'raw'
       : 'visual'
-  )
+  })
   const [matrixRows, setMatrixRows] = useState<TaskMatrixRow[]>(() => {
     const parsed = tryParseTaskMatrixConfig(
       props.billingExpr,
@@ -294,6 +332,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     return (parsed ?? createDefaultTaskMatrixConfig(props.usageSchema)).rows
   })
   const [confirmVisualSwitch, setConfirmVisualSwitch] = useState(false)
+  const [confirmDurationSwitch, setConfirmDurationSwitch] = useState(false)
   const [rawExpr, setRawExpr] = useState(() =>
     combineBillingExpr(props.billingExpr, props.requestRuleExpr)
   )
@@ -379,14 +418,38 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     props.onRequestRuleExprChange(split.requestRuleExpr)
   }
 
-  const rawSplit = splitBillingExprAndRequestRules(rawExpr)
+  const rawSplit = splitBillingExprAndRequestRules(
+    editorMode === 'duration'
+      ? combineBillingExpr(props.billingExpr, props.requestRuleExpr)
+      : rawExpr
+  )
   const rawMatrix = tryParseTaskMatrixConfig(
     rawSplit.billingExpr,
     props.usageSchema
   )
 
+  const publishDurationPrice = (next: DurationPrice) => {
+    if (!durationField) return
+    setDurationPrice(next)
+    const usage = `u(${JSON.stringify(durationField)})`
+    const quantity = next.interval === '12' ? `ceil(${usage} / 12)` : usage
+    props.onBillingExprChange(
+      `tier("duration", ${quantity} * ${formatPricingNumber(next.price)})`
+    )
+  }
+
   const handleModeChange = (nextMode: EditorMode) => {
     if (nextMode === editorMode) return
+    if (nextMode === 'duration') {
+      const current = parseDurationPrice(props.billingExpr, durationField)
+      if (props.billingExpr && !current) {
+        setConfirmDurationSwitch(true)
+        return
+      }
+      publishDurationPrice(current ?? { interval: '1', price: 0 })
+      setEditorMode('duration')
+      return
+    }
     if (nextMode === 'visual') {
       setConfirmVisualSwitch(true)
       return
@@ -420,9 +483,35 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
       row.constant === 0 &&
       numberFields.every(([field]) => !(row.unitPrices[field] > 0))
   )
+  let simulationExpression = rawExpr
+  if (editorMode === 'duration') {
+    simulationExpression = combineBillingExpr(
+      props.billingExpr,
+      props.requestRuleExpr
+    )
+  } else if (editorMode === 'visual') {
+    simulationExpression = combineBillingExpr(
+      generateTaskExprFromConfig({ tiers: visualTiers }, props.usageSchema),
+      props.requestRuleExpr
+    )
+  }
 
   return (
     <div className='space-y-5'>
+      <ConfirmDialog
+        open={confirmDurationSwitch}
+        onOpenChange={setConfirmDurationSwitch}
+        title={t('Duration pricing')}
+        desc={t(
+          'Switching to duration pricing replaces the current pricing expression.'
+        )}
+        confirmText={t('Duration pricing')}
+        handleConfirm={() => {
+          publishDurationPrice({ interval: '1', price: 0 })
+          setEditorMode('duration')
+          setConfirmDurationSwitch(false)
+        }}
+      />
       <ConfirmDialog
         open={confirmVisualSwitch}
         onOpenChange={setConfirmVisualSwitch}
@@ -446,6 +535,9 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
           <Select
             items={[
               { value: 'visual', label: t('Visual editor') },
+              ...(durationField
+                ? [{ value: 'duration', label: t('Duration pricing') }]
+                : []),
               { value: 'raw', label: t('Expression editor') },
             ]}
             value={editorMode}
@@ -463,6 +555,11 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
             <SelectContent alignItemWithTrigger={false}>
               <SelectGroup>
                 <SelectItem value='visual'>{t('Visual editor')}</SelectItem>
+                {durationField && (
+                  <SelectItem value='duration'>
+                    {t('Duration pricing')}
+                  </SelectItem>
+                )}
                 <SelectItem value='raw'>{t('Expression editor')}</SelectItem>
               </SelectGroup>
             </SelectContent>
@@ -480,7 +577,67 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
       </Alert>
 
       <div className='bg-muted/30 space-y-3 rounded-md border p-3'>
-        {editorMode === 'visual' ? (
+        {editorMode === 'duration' && durationField && (
+          <div className='grid gap-3 sm:grid-cols-2'>
+            <Field>
+              <FieldLabel>{t('Billing interval')}</FieldLabel>
+              <Select
+                items={[
+                  { value: '1', label: t('Per second') },
+                  { value: '12', label: t('Every 12 seconds (round up)') },
+                ]}
+                value={durationPrice.interval}
+                onValueChange={(value) => {
+                  if (value === '1' || value === '12') {
+                    publishDurationPrice({ ...durationPrice, interval: value })
+                  }
+                }}
+              >
+                <SelectTrigger aria-label={t('Billing interval')}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value='1'>{t('Per second')}</SelectItem>
+                  <SelectItem value='12'>
+                    {t('Every 12 seconds (round up)')}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel>{t('Price per billing interval')}</FieldLabel>
+              <PricingAmountInput
+                currency={props.currency}
+                aria-label={t('Price per billing interval')}
+                value={durationPrice.price}
+                onChange={(value) =>
+                  publishDurationPrice({
+                    ...durationPrice,
+                    price: Number(value),
+                  })
+                }
+              />
+            </Field>
+            <Field className='sm:col-span-2'>
+              <FieldLabel>
+                {t('Usage · {{price}}', { price: durationField })}
+              </FieldLabel>
+              <Input
+                aria-label={t('Usage · {{price}}', { price: durationField })}
+                type='number'
+                min={0}
+                value={previewSample[durationField] ?? 0}
+                onChange={(event) =>
+                  handlePreviewSampleChange(
+                    durationField,
+                    Math.max(0, Number(event.target.value) || 0)
+                  )
+                }
+              />
+            </Field>
+          </div>
+        )}
+        {editorMode === 'visual' && (
           <>
             {enumFields.length > 0 ? (
               <div className='flex flex-col gap-3'>
@@ -640,7 +797,8 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
               </FieldDescription>
             </Field>
           </>
-        ) : (
+        )}
+        {editorMode === 'raw' && (
           <div className='space-y-3'>
             <Alert>
               <AlertDescription className='space-y-1 text-xs'>
@@ -687,17 +845,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
         )}
       </div>
       <RequestSimulation
-        expression={
-          editorMode === 'raw'
-            ? rawExpr
-            : combineBillingExpr(
-                generateTaskExprFromConfig(
-                  { tiers: visualTiers },
-                  props.usageSchema
-                ),
-                props.requestRuleExpr
-              )
-        }
+        expression={simulationExpression}
         usage={previewSample}
         usageSchema={props.usageSchema}
         currency={props.currency}

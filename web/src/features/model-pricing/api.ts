@@ -59,6 +59,7 @@ export type ModelPricingPluginVariant = {
   effective: string
   compatible: boolean
   stale?: boolean
+  provider_only?: boolean
 }
 
 export type ModelPricingEntry = ModelPricingDescription & {

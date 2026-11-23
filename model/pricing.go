@@ -2,6 +2,8 @@ package model
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -326,6 +328,10 @@ func updatePricing() {
 
 	pricingMap = make([]Pricing, 0)
 	pluginGeneration := jsplugin.DefaultRegistry.Generation()
+	taskChannels, err := loadTaskPricingChannels(DB, pluginGeneration)
+	if err != nil {
+		common.SysError(fmt.Sprintf("load task pricing channels: %s", err))
+	}
 	for model, groups := range modelGroupsMap {
 		pricing := Pricing{
 			ModelName:              model,
@@ -385,29 +391,34 @@ func updatePricing() {
 			}
 		}
 		usageModel := model
-		plugin, ok := pluginGeneration.GetByModel(model)
-		if !ok {
+		providers := taskChannels.providers(pluginGeneration, model)
+		var plugin *jsplugin.LoadedPlugin
+		if len(providers) > 0 {
+			key := slices.Sorted(maps.Keys(providers))[0]
+			plugin, _ = pluginGeneration.Get(key)
+			usageModel = providers[key]
+		} else {
 			if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved {
-				plugin, ok = pluginGeneration.Get(target.PluginKey)
+				plugin, _ = pluginGeneration.Get(target.PluginKey)
 				usageModel = target.Declared
 			}
 		}
-		if ok && plugin != nil {
+		if plugin != nil && !taskChannels.requiresProviderPricing(model) {
 			usageSchema, usageExamples := plugin.Meta.UsageForModel(usageModel)
 			pricing.BillingUsageSchema = jsplugin.CloneUsageSchema(usageSchema)
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)
 		}
-		providers := pluginGeneration.PluginsByModel(model)
 		hasProviderOverride := false
-		for _, provider := range providers {
-			if _, configured := billing_setting.GetPluginBillingExpr(provider.Meta.Key, model); configured {
+		for key := range providers {
+			if _, configured := billing_setting.GetPluginBillingExpr(key, model); configured {
 				hasProviderOverride = true
 				break
 			}
 		}
 		if hasProviderOverride || (len(providers) >= 2 && pricing.BillingMode == billing_setting.BillingModeTieredExpr) {
-			for _, provider := range providers {
-				schema, examples := provider.Meta.UsageForModel(model)
+			for _, key := range slices.Sorted(maps.Keys(providers)) {
+				provider, _ := pluginGeneration.Get(key)
+				schema, examples := provider.Meta.UsageForModel(providers[key])
 				if schema == nil {
 					schema = map[string]jsplugin.UsageFieldSchema{}
 				}

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { act, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
 import { useState } from 'react'
@@ -203,6 +203,35 @@ it('lets users cancel or discard an unsupported expression and its request rules
   expect(
     screen.getByRole('textbox', { name: 'Billing expression' })
   ).toHaveValue('tier("base", u("seconds") * 0)')
+})
+
+it('sets a price per second or per started 12-second block', async () => {
+  const user = userEvent.setup()
+  const onChange = vi.fn()
+  render(
+    <TaskPricingDraft
+      expression='tier("base", u("seconds") * 0.4)'
+      onChange={onChange}
+    />
+  )
+  await user.click(screen.getByRole('combobox', { name: 'Editor mode' }))
+  await user.click(screen.getByRole('option', { name: 'Duration pricing' }))
+  expect(onChange).toHaveBeenLastCalledWith(
+    'tier("duration", u("seconds") * 0.4)'
+  )
+  await user.click(screen.getByRole('combobox', { name: 'Billing interval' }))
+  await user.click(
+    screen.getByRole('option', { name: 'Every 12 seconds (round up)' })
+  )
+  fireEvent.change(
+    screen.getByRole('textbox', { name: 'Price per billing interval' }),
+    {
+      target: { value: '1.20' },
+    }
+  )
+  expect(onChange).toHaveBeenLastCalledWith(
+    'tier("duration", ceil(u("seconds") / 12) * 1.2)'
+  )
 })
 
 it('confirms regeneration of supported expressions and preserves their prices and request rules', async () => {

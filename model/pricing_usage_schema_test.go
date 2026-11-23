@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -28,6 +29,98 @@ export function parseSubmitResponse() { return {}; }
 export function buildQueryRequest() { return {}; }
 export function parseTaskResult() { return {}; }
 `, version, usageSchema)
+}
+
+func TestChannelScopedTaskModelCanSaveDurationPricing(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+	require.NoError(t, DB.AutoMigrate(&Option{}))
+	originalOptionMap := common.OptionMap
+	common.OptionMap = make(map[string]string)
+	t.Cleanup(func() { common.OptionMap = originalOptionMap })
+	const modelName = "test-channel-video"
+	const pluginKey = "test-channel-duration"
+	source := strings.Replace(pricingUsagePluginSource("1.0.0", `{
+		seconds: {type: "number", unit: "second", description: "Video generation unit price"}
+	}`), `key: "pricing-usage-probe"`, `key: "test-channel-duration", modelScope: "channel", protocols: ["openai_video"]`, 1)
+	source += `
+export const protocols = {openai_video: {decodeRequest() {}, render() {}}};
+export function listArtifacts() { return []; }
+export function buildContentRequest() { return {}; }
+`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(pluginKey) })
+
+	video := Channel{Id: 933, Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Models: modelName}
+	video.SetSetting(dto.ChannelSettings{TaskPluginKey: pluginKey})
+	require.NoError(t, DB.Create(&video).Error)
+	insertPricingEndpointAbility(t, video.Id, modelName)
+	image := Channel{Id: 934, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Models: "test-channel-image"}
+	image.SetSetting(dto.ChannelSettings{TaskPluginKey: pluginKey})
+	require.NoError(t, DB.Create(&image).Error)
+
+	const expression = `tier("base", ceil(u("seconds") / 12) * 0.3)`
+	const perSecond = `tier("base", u("seconds") * 0.1)`
+	draft := PricingValues{billing_setting.PluginBillingExprOption: map[string]any{pluginKey: expression}}
+	snapshot, err := GetModelPricingSnapshot([]string{modelName})
+	require.NoError(t, err)
+	require.Len(t, snapshot.Entries, 1)
+	entry := snapshot.Entries[0]
+	require.Len(t, entry.PluginVariants, 1)
+	assert.Equal(t, "second", entry.PluginVariants[0].UsageSchema["seconds"].Unit)
+	_, err = PreviewModelPricing(modelName, PricingValues{"billing_setting.billing_expr": perSecond})
+	require.NoError(t, err)
+	_, err = PreviewModelPricing(modelName, draft)
+	require.NoError(t, err)
+	assert.Error(t, ValidateModelPricing("test-channel-image", draft))
+	require.NoError(t, UpdateModelPricing([]ModelPricingChange{{
+		ModelName: modelName, ExpectedVersion: entry.Version, Pricing: draft,
+	}}))
+	t.Cleanup(func() {
+		saved, err := GetModelPricingSnapshot([]string{modelName})
+		require.NoError(t, err)
+		require.NoError(t, UpdateModelPricing([]ModelPricingChange{{
+			ModelName: modelName, ExpectedVersion: saved.Entries[0].Version, Reset: true,
+		}}))
+	})
+	assert.Equal(t, "second", pricingByModel(GetPricing())[modelName].BillingUsageSchema["seconds"].Unit)
+	saved, err := GetModelPricingSnapshot([]string{modelName})
+	require.NoError(t, err)
+	assert.Equal(t, expression, saved.Entries[0].PluginVariants[0].Effective)
+	for _, tc := range []struct {
+		seconds   float64
+		perSecond float64
+		perBlock  float64
+	}{
+		{0, 0, 0},
+		{1, 0.1, 0.3},
+		{12, 1.2, 0.3},
+		{13, 1.3, 0.6},
+		{24, 2.4, 0.6},
+	} {
+		request := billingexpr.RequestInput{Usage: map[string]any{"seconds": tc.seconds}}
+		blocks, _, err := billingexpr.RunExprWithRequest(saved.Entries[0].PluginVariants[0].Effective, billingexpr.TokenParams{}, request)
+		require.NoError(t, err)
+		assert.InDelta(t, tc.perBlock, blocks, 0.000001, "seconds=%g", tc.seconds)
+		seconds, _, err := billingexpr.RunExprWithRequest(perSecond, billingexpr.TokenParams{}, request)
+		require.NoError(t, err)
+		assert.InDelta(t, tc.perSecond, seconds, 0.000001, "seconds=%g", tc.seconds)
+	}
+
+	require.NoError(t, DB.Model(&image).Update("models", modelName).Error)
+	mixed, err := GetModelPricingSnapshot([]string{modelName})
+	require.NoError(t, err)
+	assert.Empty(t, mixed.Entries[0].UsageSchema)
+	require.Len(t, mixed.Entries[0].PluginVariants, 1)
+	assert.True(t, mixed.Entries[0].PluginVariants[0].ProviderOnly)
+	assert.ErrorContains(t, ValidateModelPricing(modelName, PricingValues{"billing_setting.billing_expr": expression}), "separately for its provider")
+	require.NoError(t, ValidateModelPricing(modelName, draft))
+
+	require.NoError(t, DB.Model(&video).Update("status", common.ChannelStatusManuallyDisabled).Error)
+	disabled, err := GetModelPricingSnapshot([]string{modelName})
+	require.NoError(t, err)
+	require.Len(t, disabled.Entries[0].PluginVariants, 1)
+	assert.True(t, disabled.Entries[0].PluginVariants[0].Stale)
 }
 
 func TestPricingCarriesTaskUsageSchemaAndRefreshesWithPluginGeneration(t *testing.T) {
