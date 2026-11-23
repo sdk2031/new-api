@@ -6,10 +6,10 @@ export const meta = {
   name: "FDAI Video",
   icon: "text:FD",
   description: {
-    en: "Video generation through the FDAI task API",
-    zh: "通过 FDAI 任务接口生成视频",
+    en: "FDAI video generation and image response compatibility",
+    zh: "FDAI 视频生成与图片响应兼容",
   },
-  version: "1.2.0",
+  version: "1.3.0",
   author: { name: "Duomi API" },
   baseUrl: "https://api.fdai.xyz",
   models: ["sd2.0_mini-720p-zr-903-12s", "sd2.0_mini-480p-zr-903-15s"],
@@ -39,6 +39,10 @@ function isObject(value) {
 
 function isHTTPURL(value) {
   return /^https?:\/\/[^\s]+$/i.test(trimmed(value));
+}
+
+export function resolvePlaygroundImageURL(b64JSON) {
+  return isHTTPURL(b64JSON) ? trimmed(b64JSON) : null;
 }
 
 function upstreamError(body) {

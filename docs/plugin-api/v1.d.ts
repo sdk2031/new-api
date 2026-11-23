@@ -84,3 +84,5 @@ export declare function listArtifacts(task: {taskId: string; status: string; act
 export declare function buildContentRequest(ctx: DriverContext & {artifactKey: string; data: unknown; state?: unknown; upstreamTaskId: string; clientRequest: {method: "GET" | "HEAD"; headers: Readonly<Record<string, string>>}}): RequestDescriptor;
 export declare function buildPerformanceRequest(ctx: PerformanceRequestContext): RequestDescriptor;
 export declare function parsePerformanceResponse(ctx: PerformanceRequestContext, body: unknown, response: HookHTTPResponse): readonly PerformanceModel[];
+/** Optional FDAI online chat image result compatibility. */
+export declare function resolvePlaygroundImageURL(b64JSON: string): string | null;

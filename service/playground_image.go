@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/google/uuid"
 )
@@ -23,6 +24,8 @@ import (
 const (
 	MaxPlaygroundImageResponseBytes = 32 << 20
 	maxPlaygroundImageBytes         = 16 << 20
+	maxPluginImageURLBytes          = 8 << 10
+	playgroundImageURLHook          = "resolvePlaygroundImageURL"
 )
 
 var playgroundImageFilePattern = regexp.MustCompile(`^[a-f0-9-]{36}\.(png|jpg|webp|gif)$`)
@@ -57,11 +60,26 @@ func playgroundImageDir(userID int) string {
 	return filepath.Join(common.GetEnvOrDefaultString("PLAYGROUND_IMAGE_DIR", "playground-images"), strconv.Itoa(userID))
 }
 
-func StorePlaygroundImages(ctx context.Context, userID int, body []byte) ([]PlaygroundImageResult, error) {
-	return storePlaygroundImages(ctx, userID, body, playgroundImageClient)
+func playgroundImageURLPlugin(channelBaseURL string, registry *jsplugin.Registry) *jsplugin.LoadedPlugin {
+	upstream, err := url.Parse(strings.TrimSpace(channelBaseURL))
+	if err != nil || (upstream.Scheme != "http" && upstream.Scheme != "https") {
+		return nil
+	}
+	switch strings.ToLower(upstream.Hostname()) {
+	case "api.fdai.xyz", "apinocf.fdai.xyz":
+		plugin, _ := registry.Get("fdai-video")
+		return plugin
+	default:
+		return nil
+	}
 }
 
-func storePlaygroundImages(ctx context.Context, userID int, body []byte, client *http.Client) ([]PlaygroundImageResult, error) {
+func StorePlaygroundImages(ctx context.Context, userID int, channelBaseURL string, body []byte) ([]PlaygroundImageResult, error) {
+	plugin := playgroundImageURLPlugin(channelBaseURL, jsplugin.DefaultRegistry)
+	return storePlaygroundImages(ctx, userID, body, playgroundImageClient, plugin)
+}
+
+func storePlaygroundImages(ctx context.Context, userID int, body []byte, client *http.Client, plugin *jsplugin.LoadedPlugin) ([]PlaygroundImageResult, error) {
 	var response struct {
 		Data []upstreamPlaygroundImage `json:"data"`
 	}
@@ -74,11 +92,31 @@ func storePlaygroundImages(ctx context.Context, userID int, body []byte, client 
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
+	hasURLHook := false
+	if plugin != nil {
+		var err error
+		hasURLHook, err = plugin.Engine.HasCallablePath(ctx, playgroundImageURLHook)
+		if err != nil {
+			return nil, err
+		}
+	}
 	paths := make([]string, 0, len(response.Data))
 	results := make([]PlaygroundImageResult, 0, len(response.Data))
 	remaining := int64(MaxPlaygroundImageResponseBytes)
 	for _, image := range response.Data {
-		name, size, err := savePlaygroundImage(ctx, dir, image, min(remaining, maxPlaygroundImageBytes), client)
+		var err error
+		if hasURLHook && len(image.Base64) > 0 && len(image.Base64) <= maxPluginImageURLBytes {
+			var value any
+			value, err = plugin.Engine.Call(ctx, playgroundImageURLHook, image.Base64)
+			if imageURL, ok := value.(string); ok && imageURL != "" {
+				image = upstreamPlaygroundImage{URL: imageURL}
+			}
+		}
+		var name string
+		var size int64
+		if err == nil {
+			name, size, err = savePlaygroundImage(ctx, dir, image, min(remaining, maxPlaygroundImageBytes), client)
+		}
 		if err != nil {
 			for _, path := range paths {
 				_ = os.Remove(path)
@@ -96,19 +134,11 @@ func savePlaygroundImage(ctx context.Context, dir string, image upstreamPlaygrou
 	if err := ctx.Err(); err != nil {
 		return "", 0, err
 	}
-	imageURL := image.URL
-	encoded := strings.TrimSpace(image.Base64)
-	// Some OpenAI-compatible providers put the image URL in b64_json.
-	if scheme, _, found := strings.Cut(encoded, "://"); found &&
-		(strings.EqualFold(scheme, "http") || strings.EqualFold(scheme, "https")) {
-		imageURL = encoded
-		encoded = ""
-	}
 	var source io.Reader
-	if encoded != "" {
-		source = base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
+	if image.Base64 != "" {
+		source = base64.NewDecoder(base64.StdEncoding, strings.NewReader(image.Base64))
 	} else {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, image.URL, nil)
 		if err != nil || req.URL.Hostname() == "" || req.URL.User != nil || (req.URL.Scheme != "http" && req.URL.Scheme != "https") {
 			return "", 0, errors.New("invalid image URL")
 		}
