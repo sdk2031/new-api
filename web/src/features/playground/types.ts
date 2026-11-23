@@ -23,10 +23,10 @@ export type MessageStatus = 'loading' | 'streaming' | 'complete' | 'error'
 
 export type PlaygroundMessageLayoutMode = 'alternating' | 'left'
 
-export type PlaygroundMode = 'chat' | 'generate' | 'edit'
+export type PlaygroundMode = 'chat' | 'generate'
 
 export type PlaygroundImageRequest = {
-  mode: Exclude<PlaygroundMode, 'chat'>
+  mode: 'generate' | 'edit'
   model: string
   group: string
   size?: string

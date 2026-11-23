@@ -104,22 +104,14 @@ export function PlaygroundInputControls({
     )
 
   return (
-    <div className='flex w-full flex-col gap-2.5 md:flex-row md:items-center md:justify-between'>
-      <div className='flex min-w-0 items-center justify-end md:hidden'>
-        {renderSelector()}
-      </div>
-
-      <div className='flex items-center justify-between gap-2 md:justify-start'>
+    <div className='grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 md:grid-cols-[minmax(0,1fr)_auto_auto]'>
+      <div className='flex min-w-0 flex-wrap items-center gap-2'>
         {tools}
-        <div className='flex items-center gap-1.5 md:hidden'>
-          {renderSubmitButton()}
-        </div>
       </div>
-
-      <div className='hidden min-w-0 items-center gap-2 md:flex'>
+      <div className='flex min-w-0 justify-end max-md:col-span-2 max-md:row-start-1'>
         {renderSelector()}
-        {renderSubmitButton()}
       </div>
+      {renderSubmitButton()}
     </div>
   )
 }

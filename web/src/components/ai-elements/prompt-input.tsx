@@ -95,8 +95,10 @@ import { cn } from '@/lib/utils'
 // Provider Context & Types
 // ============================================================================
 
+type PromptAttachment = FileUIPart & { id: string; file: File }
+
 export type AttachmentsContext = {
-  files: (FileUIPart & { id: string })[]
+  files: PromptAttachment[]
   add: (files: File[] | FileList) => void
   remove: (id: string) => void
   clear: () => void
@@ -170,9 +172,7 @@ export function PromptInputProvider({
   const clearInput = useCallback(() => setTextInput(''), [])
 
   // ----- attachments state (global when wrapped)
-  const [attachements, setAttachements] = useState<
-    (FileUIPart & { id: string })[]
-  >([])
+  const [attachements, setAttachements] = useState<PromptAttachment[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const openRef = useRef<() => void>(() => {})
 
@@ -188,6 +188,7 @@ export function PromptInputProvider({
           url: URL.createObjectURL(file),
           mediaType: file.type,
           filename: file.name,
+          file,
         }))
       )
     )
@@ -326,7 +327,7 @@ export function PromptInputAttachment({
           </div>
           <Button
             aria-label={t('Remove attachment')}
-            className='absolute inset-0 size-5 cursor-pointer rounded p-0 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 [&>svg]:size-2.5'
+            className='absolute inset-0 size-5 cursor-pointer rounded p-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [&>svg]:size-2.5'
             onClick={(e) => {
               e.stopPropagation()
               attachments.remove(data.id)
@@ -423,6 +424,7 @@ export const PromptInputActionAddAttachments = ({
 export type PromptInputMessage = {
   text?: string
   files?: FileUIPart[]
+  attachmentFiles?: File[]
 }
 
 export type PromptInputProps = Omit<
@@ -438,6 +440,8 @@ export type PromptInputProps = Omit<
   // Minimal constraints
   maxFiles?: number
   maxFileSize?: number // bytes
+  attachmentsEnabled?: boolean
+  attachmentFormat?: 'data-url' | 'file'
   onError?: (err: {
     code: 'max_files' | 'max_file_size' | 'accept'
     message: string
@@ -445,7 +449,7 @@ export type PromptInputProps = Omit<
   onSubmit: (
     message: PromptInputMessage,
     event: FormEvent<HTMLFormElement>
-  ) => void | Promise<void>
+  ) => void | false | Promise<void | false>
   /**
    * Optional className applied to the inner InputGroup wrapper
    * (useful for layout or semantic radius utilities such as rounded-xl).
@@ -462,6 +466,8 @@ export const PromptInput = ({
   syncHiddenInput,
   maxFiles,
   maxFileSize,
+  attachmentsEnabled = true,
+  attachmentFormat = 'data-url',
   onError,
   onSubmit,
   children,
@@ -486,23 +492,30 @@ export const PromptInput = ({
   }, [])
 
   // ----- Local attachments (only used when no provider)
-  const [items, setItems] = useState<(FileUIPart & { id: string })[]>([])
+  const [items, setItems] = useState<PromptAttachment[]>([])
+  const localItems = useRef<PromptAttachment[]>([])
   const files = usingProvider ? controller.attachments.files : items
 
   const openFileDialogLocal = useCallback(() => {
-    inputRef.current?.click()
-  }, [])
+    if (attachmentsEnabled) inputRef.current?.click()
+  }, [attachmentsEnabled])
 
   const matchesAccept = useCallback(
     (f: File) => {
-      if (!accept || accept.trim() === '') {
-        return true
-      }
-      if (accept.includes('image/*')) {
-        return f.type.startsWith('image/')
-      }
-      // NOTE: keep simple; expand as needed
-      return true
+      if (!accept?.trim()) return true
+      return accept
+        .toLowerCase()
+        .split(',')
+        .some((value) => {
+          const pattern = value.trim()
+          if (pattern.startsWith('.')) {
+            return f.name.toLowerCase().endsWith(pattern)
+          }
+          if (pattern.endsWith('/*')) {
+            return f.type.startsWith(pattern.slice(0, -1))
+          }
+          return f.type === pattern
+        })
     },
     [accept]
   )
@@ -529,55 +542,50 @@ export const PromptInput = ({
         return
       }
 
-      setItems((prev) => {
-        const capacity =
-          typeof maxFiles === 'number'
-            ? Math.max(0, maxFiles - prev.length)
-            : undefined
-        const capped =
-          typeof capacity === 'number' ? sized.slice(0, capacity) : sized
-        if (typeof capacity === 'number' && sized.length > capacity) {
-          onError?.({
-            code: 'max_files',
-            message: t('Too many files. Some were not added.'),
-          })
-        }
-        const next: (FileUIPart & { id: string })[] = []
-        for (const file of capped) {
-          next.push({
-            id: nanoid(),
-            type: 'file',
-            url: URL.createObjectURL(file),
-            mediaType: file.type,
-            filename: file.name,
-          })
-        }
-        return prev.concat(next)
-      })
+      const previous = localItems.current
+      const capacity = Math.max(0, (maxFiles ?? Infinity) - previous.length)
+      if (sized.length > capacity) {
+        onError?.({
+          code: 'max_files',
+          message: t('Too many files. Some were not added.'),
+        })
+      }
+      if (capacity === 0 || sized.length === 0) return
+      localItems.current = previous.concat(
+        sized.slice(0, capacity).map((file) => ({
+          id: nanoid(),
+          type: 'file',
+          url: URL.createObjectURL(file),
+          mediaType: file.type,
+          filename: file.name,
+          file,
+        }))
+      )
+      setItems(localItems.current)
     },
     [matchesAccept, maxFiles, maxFileSize, onError, t]
   )
 
-  const add = useMemo(
-    () =>
-      controller
-        ? (files: File[] | FileList) => controller.attachments.add(files)
-        : addLocal,
-    [controller, addLocal]
+  const add = useCallback(
+    (files: File[] | FileList) => {
+      if (!attachmentsEnabled) return
+      if (controller) controller.attachments.add(files)
+      else addLocal(files)
+    },
+    [controller, addLocal, attachmentsEnabled]
   )
 
   const remove = useMemo(
     () =>
       controller
         ? (id: string) => controller.attachments.remove(id)
-        : (id: string) =>
-            setItems((prev) => {
-              const found = prev.find((file) => file.id === id)
-              if (found?.url) {
-                URL.revokeObjectURL(found.url)
-              }
-              return prev.filter((file) => file.id !== id)
-            }),
+        : (id: string) => {
+            const found = localItems.current.find((file) => file.id === id)
+            if (!found) return
+            URL.revokeObjectURL(found.url)
+            localItems.current = localItems.current.filter((file) => file.id !== id)
+            setItems(localItems.current)
+          },
     [controller]
   )
 
@@ -585,15 +593,11 @@ export const PromptInput = ({
     () =>
       controller
         ? () => controller.attachments.clear()
-        : () =>
-            setItems((prev) => {
-              for (const file of prev) {
-                if (file.url) {
-                  URL.revokeObjectURL(file.url)
-                }
-              }
-              return []
-            }),
+        : () => {
+            for (const item of localItems.current) URL.revokeObjectURL(item.url)
+            localItems.current = []
+            setItems([])
+          },
     [controller]
   )
 
@@ -671,19 +675,16 @@ export const PromptInput = ({
 
   useEffect(
     () => () => {
-      if (!usingProvider) {
-        for (const f of files) {
-          if (f.url) URL.revokeObjectURL(f.url)
-        }
-      }
+      for (const item of localItems.current) URL.revokeObjectURL(item.url)
     },
-    [usingProvider, files]
+    []
   )
 
   const handleChange: ChangeEventHandler<HTMLInputElement> = (event) => {
     if (event.currentTarget.files) {
       add(event.currentTarget.files)
     }
+    event.currentTarget.value = ''
   }
 
   const convertBlobUrlToDataUrl = async (url: string): Promise<string> => {
@@ -699,7 +700,7 @@ export const PromptInput = ({
 
   const ctx = useMemo<AttachmentsContext>(
     () => ({
-      files: files.map((item) => ({ ...item, id: item.id })),
+      files,
       add,
       remove,
       clear,
@@ -720,15 +721,39 @@ export const PromptInput = ({
           return (formData.get('message') as string) || ''
         })()
 
-    // Reset form immediately after capturing text to avoid race condition
-    // where user input during async blob conversion would be lost
-    if (!usingProvider) {
+    // Reset before async blob conversion so newly typed text is not lost.
+    if (!usingProvider && attachmentFormat === 'data-url') {
       form.reset()
     }
 
-    // Convert blob URLs to data URLs asynchronously
-    Promise.all(
-      files.map(async ({ id, ...item }) => {
+    const submit = (message: PromptInputMessage) => {
+      const finish = (result: void | false) => {
+        if (result === false) return
+        if (!usingProvider && attachmentFormat === 'file') form.reset()
+        clear()
+        controller?.textInput.clear()
+      }
+      try {
+        const result = onSubmit(message, event)
+        if (result instanceof Promise) {
+          void result.then(finish).catch(() => {
+            // Keep the attachments so the user can retry.
+          })
+        } else {
+          finish(result)
+        }
+      } catch {
+        // Keep the attachments so the user can retry.
+      }
+    }
+    const attachments = usingProvider ? files : localItems.current
+    if (attachmentFormat === 'file') {
+      submit({ text, attachmentFiles: attachments.map((item) => item.file) })
+      return
+    }
+    // Convert blob URLs to data URLs asynchronously for the default format.
+    void Promise.all(
+      attachments.map(async ({ id, file, ...item }) => {
         if (item.url && item.url.startsWith('blob:')) {
           return {
             ...item,
@@ -737,33 +762,7 @@ export const PromptInput = ({
         }
         return item
       })
-    ).then((convertedFiles: FileUIPart[]) => {
-      try {
-        const result = onSubmit({ text, files: convertedFiles }, event)
-
-        // Handle both sync and async onSubmit
-        if (result instanceof Promise) {
-          result
-            .then(() => {
-              clear()
-              if (usingProvider) {
-                controller.textInput.clear()
-              }
-            })
-            .catch(() => {
-              // Don't clear on error - user may want to retry
-            })
-        } else {
-          // Sync function completed without throwing, clear attachments
-          clear()
-          if (usingProvider) {
-            controller.textInput.clear()
-          }
-        }
-      } catch (_error) {
-        // Don't clear on error - user may want to retry
-      }
-    })
+    ).then((convertedFiles) => submit({ text, files: convertedFiles }))
   }
 
   // Render with or without local provider
@@ -774,6 +773,7 @@ export const PromptInput = ({
         accept={accept}
         aria-label={t('Upload files')}
         className='hidden'
+        disabled={!attachmentsEnabled}
         multiple={multiple}
         onChange={handleChange}
         ref={inputRef}
@@ -808,12 +808,15 @@ export const PromptInputBody = ({
   <div className={cn('contents', className)} {...props} />
 )
 
-export type PromptInputTextareaProps = ComponentProps<typeof InputGroupTextarea>
+export type PromptInputTextareaProps = ComponentProps<typeof InputGroupTextarea> & {
+  pasteAttachments?: boolean
+}
 
 export const PromptInputTextarea = ({
   onChange,
   className,
   placeholder,
+  pasteAttachments = true,
   ...props
 }: PromptInputTextareaProps) => {
   const { t } = useTranslation()
@@ -852,15 +855,11 @@ export const PromptInputTextarea = ({
   }
 
   const handlePaste: ClipboardEventHandler<HTMLTextAreaElement> = (event) => {
-    const items = event.clipboardData?.items
-
-    if (!items) {
-      return
-    }
+    if (!pasteAttachments) return
 
     const files: File[] = []
 
-    for (const item of items) {
+    for (const item of event.clipboardData?.items ?? []) {
       if (item.kind === 'file') {
         const file = item.getAsFile()
         if (file) {
@@ -869,6 +868,9 @@ export const PromptInputTextarea = ({
       }
     }
 
+    if (files.length === 0) {
+      files.push(...Array.from(event.clipboardData?.files ?? []))
+    }
     if (files.length > 0) {
       event.preventDefault()
       attachments.add(files)
@@ -912,7 +914,7 @@ export const PromptInputHeader = ({
   ...props
 }: PromptInputHeaderProps) => (
   <InputGroupAddon
-    align='block-end'
+    align='block-start'
     className={cn('order-first flex-wrap gap-1', className)}
     {...props}
   />

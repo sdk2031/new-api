@@ -24,6 +24,7 @@ import { toast } from 'sonner'
 import {
   PromptInputButton,
   PromptInputTools,
+  usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
@@ -74,6 +75,7 @@ export function PlaygroundInputTools({
   parameterEnabled,
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
+  const { openFileDialog } = usePromptInputAttachments()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
 
   const handleFileAction = (action: string) => {
@@ -97,6 +99,23 @@ export function PlaygroundInputTools({
   return (
     <>
       <PromptInputTools className='bg-background/70 border-border/60 rounded-lg border p-1 shadow-xs'>
+        {isImageMode && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <PromptInputButton
+                  aria-label={t('Upload reference images')}
+                  disabled={disabled}
+                  onClick={openFileDialog}
+                  variant='ghost'
+                />
+              }
+            >
+              <PaperclipIcon size={16} />
+            </TooltipTrigger>
+            <TooltipContent>{t('Upload reference images')}</TooltipContent>
+          </Tooltip>
+        )}
         {!isImageMode && (
           <>
             <Tooltip>
