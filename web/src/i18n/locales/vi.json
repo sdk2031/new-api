@@ -2048,6 +2048,7 @@
     "Ensure Suffix": "Đảm bảo hậu tố",
     "Ensure the string has a specified prefix": "Đảm bảo chuỗi có tiền tố chỉ định",
     "Ensure the string has a specified suffix": "Đảm bảo chuỗi có hậu tố chỉ định",
+    "Enter 1 to charge per second. Longer intervals round up to the next whole interval.": "Nhập 1 để tính phí theo giây, các khoảng dài hơn sẽ được làm tròn lên đơn vị đầy đủ tiếp theo.",
     "Enter 6-digit code": "Nhập mã 6 chữ số",
     "Enter a domain such as example.com or localhost, without a protocol, port or path. Put addresses with ports in Allowed Passkey websites.": "Chỉ nhập tên miền như example.com hoặc localhost, không kèm giao thức, cổng hay đường dẫn. Điền địa chỉ có cổng vào «Các trang được phép dùng Passkey».",
     "Enter a finite, non-negative price": "Nhập giá hữu hạn, không âm",

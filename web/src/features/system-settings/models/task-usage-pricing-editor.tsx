@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { AlertTriangle } from 'lucide-react'
-import { memo, useState } from 'react'
+import { memo, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
@@ -90,7 +90,13 @@ type TaskUsagePricingEditorProps = {
 
 type EditorMode = 'visual' | 'raw' | 'duration'
 
-type DurationPrice = { interval: '1' | '12'; price: number }
+type DurationPrice = { interval: number; price: number }
+
+function parseBillingInterval(value: string): number | null {
+  if (!/^\d+$/.test(value)) return null
+  const interval = Number(value)
+  return Number.isSafeInteger(interval) && interval > 0 ? interval : null
+}
 
 function parseDurationPrice(
   expression: string,
@@ -98,15 +104,17 @@ function parseDurationPrice(
 ): DurationPrice | null {
   if (!field) return null
   const match =
-    /^tier\("(?:base|duration)",\s*(?:ceil\((u\("[^"]+"\))\s*\/\s*12\)|(u\("[^"]+"\)))\s*\*\s*([\d.eE+-]+)\)$/.exec(
+    /^tier\("(?:base|duration)",\s*(?:ceil\((u\("[^"]+"\))\s*\/\s*(\d+)\)|(u\("[^"]+"\)))\s*\*\s*([\d.eE+-]+)\)$/.exec(
       expression.trim()
     )
-  if (!match || (match[1] ?? match[2]) !== `u(${JSON.stringify(field)})`) {
+  if (!match || (match[1] ?? match[3]) !== `u(${JSON.stringify(field)})`) {
     return null
   }
-  const price = Number(match[3])
-  if (!Number.isFinite(price) || price < 0) return null
-  return { interval: match[1] ? '12' : '1', price }
+  const interval = parseBillingInterval(match[2] ?? '1')
+  const price = Number(match[4])
+  if (interval === null || !Number.isFinite(price) || price < 0) return null
+  if (match[1] && interval === 1) return null
+  return { interval, price }
 }
 
 type TaskBillingPreviewProps = {
@@ -307,15 +315,20 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
   const [durationPrice, setDurationPrice] = useState<DurationPrice>(
     () =>
       parseDurationPrice(props.billingExpr, durationField) ?? {
-        interval: '1',
+        interval: 1,
         price: 0,
       }
   )
+  const [intervalDraft, setIntervalDraft] = useState(() =>
+    String(durationPrice.interval)
+  )
+  const validInterval = parseBillingInterval(intervalDraft)
+  const intervalDescriptionId = useId()
   const [editorMode, setEditorMode] = useState<EditorMode>(() => {
     if (
       parseDurationPrice(props.billingExpr, durationField) &&
       (props.billingExpr.trim().startsWith('tier("duration",') ||
-        durationPrice.interval === '12')
+        durationPrice.interval > 1)
     ) {
       return 'duration'
     }
@@ -432,7 +445,8 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     if (!durationField) return
     setDurationPrice(next)
     const usage = `u(${JSON.stringify(durationField)})`
-    const quantity = next.interval === '12' ? `ceil(${usage} / 12)` : usage
+    const quantity =
+      next.interval > 1 ? `ceil(${usage} / ${next.interval})` : usage
     props.onBillingExprChange(
       `tier("duration", ${quantity} * ${formatPricingNumber(next.price)})`
     )
@@ -446,7 +460,9 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
         setConfirmDurationSwitch(true)
         return
       }
-      publishDurationPrice(current ?? { interval: '1', price: 0 })
+      const next = current ?? { interval: 1, price: 0 }
+      setIntervalDraft(String(next.interval))
+      publishDurationPrice(next)
       setEditorMode('duration')
       return
     }
@@ -507,7 +523,8 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
         )}
         confirmText={t('Duration pricing')}
         handleConfirm={() => {
-          publishDurationPrice({ interval: '1', price: 0 })
+          setIntervalDraft('1')
+          publishDurationPrice({ interval: 1, price: 0 })
           setEditorMode('duration')
           setConfirmDurationSwitch(false)
         }}
@@ -581,34 +598,49 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
           <div className='grid gap-3 sm:grid-cols-2'>
             <Field>
               <FieldLabel>{t('Billing interval')}</FieldLabel>
-              <Select
-                items={[
-                  { value: '1', label: t('Per second') },
-                  { value: '12', label: t('Every 12 seconds (round up)') },
-                ]}
-                value={durationPrice.interval}
-                onValueChange={(value) => {
-                  if (value === '1' || value === '12') {
-                    publishDurationPrice({ ...durationPrice, interval: value })
-                  }
-                }}
-              >
-                <SelectTrigger aria-label={t('Billing interval')}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value='1'>{t('Per second')}</SelectItem>
-                  <SelectItem value='12'>
-                    {t('Every 12 seconds (round up)')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <div className='flex items-center gap-2'>
+                <Input
+                  aria-label={t('Billing interval')}
+                  aria-describedby={intervalDescriptionId}
+                  aria-invalid={validInterval === null || undefined}
+                  data-billing-invalid={validInterval === null || undefined}
+                  inputMode='numeric'
+                  value={intervalDraft}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setIntervalDraft(value)
+                    const interval = parseBillingInterval(value)
+                    if (interval !== null) {
+                      publishDurationPrice({ ...durationPrice, interval })
+                    }
+                  }}
+                />
+                <span className='text-muted-foreground shrink-0 text-xs'>
+                  {t('seconds')}
+                </span>
+              </div>
+              {validInterval === null ? (
+                <FieldDescription
+                  id={intervalDescriptionId}
+                  role='alert'
+                  className='text-destructive'
+                >
+                  {t('Enter a positive integer')}
+                </FieldDescription>
+              ) : (
+                <FieldDescription id={intervalDescriptionId}>
+                  {t(
+                    'Enter 1 to charge per second. Longer intervals round up to the next whole interval.'
+                  )}
+                </FieldDescription>
+              )}
             </Field>
             <Field>
               <FieldLabel>{t('Price per billing interval')}</FieldLabel>
               <PricingAmountInput
                 currency={props.currency}
                 aria-label={t('Price per billing interval')}
+                disabled={validInterval === null}
                 value={durationPrice.price}
                 onChange={(value) =>
                   publishDurationPrice({

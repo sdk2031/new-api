@@ -205,7 +205,7 @@ it('lets users cancel or discard an unsupported expression and its request rules
   ).toHaveValue('tier("base", u("seconds") * 0)')
 })
 
-it('sets a price per second or per started 12-second block', async () => {
+it('sets a price per second or per started custom interval', async () => {
   const user = userEvent.setup()
   const onChange = vi.fn()
   render(
@@ -219,9 +219,10 @@ it('sets a price per second or per started 12-second block', async () => {
   expect(onChange).toHaveBeenLastCalledWith(
     'tier("duration", u("seconds") * 0.4)'
   )
-  await user.click(screen.getByRole('combobox', { name: 'Billing interval' }))
-  await user.click(
-    screen.getByRole('option', { name: 'Every 12 seconds (round up)' })
+  await user.clear(screen.getByRole('textbox', { name: 'Billing interval' }))
+  await user.type(
+    screen.getByRole('textbox', { name: 'Billing interval' }),
+    '30'
   )
   fireEvent.change(
     screen.getByRole('textbox', { name: 'Price per billing interval' }),
@@ -230,9 +231,36 @@ it('sets a price per second or per started 12-second block', async () => {
     }
   )
   expect(onChange).toHaveBeenLastCalledWith(
-    'tier("duration", ceil(u("seconds") / 12) * 1.2)'
+    'tier("duration", ceil(u("seconds") / 30) * 1.2)'
   )
 })
+
+it.each([12, 30])(
+  'restores a saved %s-second interval and rejects invalid edits',
+  (interval) => {
+    const onChange = vi.fn()
+    render(
+      <TaskPricingDraft
+        expression={`tier("duration", ceil(u("seconds") / ${interval}) * 1.2)`}
+        onChange={onChange}
+      />
+    )
+    const input = screen.getByRole('textbox', { name: 'Billing interval' })
+    expect(input).toHaveValue(String(interval))
+    const price = screen.getByRole('textbox', {
+      name: 'Price per billing interval',
+    })
+    expect(price).toHaveValue('1.2')
+
+    for (const value of ['', '0', '-2', '2.5']) {
+      fireEvent.change(input, { target: { value } })
+      expect(input).toHaveAttribute('data-billing-invalid', 'true')
+      expect(input).toHaveAccessibleDescription('Enter a positive integer')
+      expect(price).toBeDisabled()
+    }
+    expect(onChange).not.toHaveBeenCalled()
+  }
+)
 
 it('confirms regeneration of supported expressions and preserves their prices and request rules', async () => {
   const user = userEvent.setup()

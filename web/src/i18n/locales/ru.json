@@ -2048,6 +2048,7 @@
     "Ensure Suffix": "Обеспечить суффикс",
     "Ensure the string has a specified prefix": "Убедиться, что строка имеет указанный префикс",
     "Ensure the string has a specified suffix": "Убедиться, что строка имеет указанный суффикс",
+    "Enter 1 to charge per second. Longer intervals round up to the next whole interval.": "Введите 1 для посекундной оплаты, более длинные интервалы округляются вверх до полного интервала.",
     "Enter 6-digit code": "Введите 6-значный код",
     "Enter a domain such as example.com or localhost, without a protocol, port or path. Put addresses with ports in Allowed Passkey websites.": "Укажите домен, например example.com или localhost, без протокола, порта и пути. Адреса с портами добавьте в «Сайты, разрешённые для Passkey».",
     "Enter a finite, non-negative price": "Введите конечную неотрицательную цену",

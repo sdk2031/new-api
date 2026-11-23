@@ -2048,6 +2048,7 @@
     "Ensure Suffix": "Ensure Suffix",
     "Ensure the string has a specified prefix": "Ensure the string has a specified prefix",
     "Ensure the string has a specified suffix": "Ensure the string has a specified suffix",
+    "Enter 1 to charge per second. Longer intervals round up to the next whole interval.": "Enter 1 to charge per second. Longer intervals round up to the next whole interval.",
     "Enter 6-digit code": "Enter 6-digit code",
     "Enter a domain such as example.com or localhost, without a protocol, port or path. Put addresses with ports in Allowed Passkey websites.": "Enter a domain such as example.com or localhost, without a protocol, port or path. Put addresses with ports in Allowed Passkey websites.",
     "Enter a finite, non-negative price": "Enter a finite, non-negative price",

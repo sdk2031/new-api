@@ -2048,6 +2048,7 @@
     "Ensure Suffix": "Garantir le suffixe",
     "Ensure the string has a specified prefix": "S'assurer que la chaîne a un préfixe spécifié",
     "Ensure the string has a specified suffix": "S'assurer que la chaîne a un suffixe spécifié",
+    "Enter 1 to charge per second. Longer intervals round up to the next whole interval.": "Saisissez 1 pour facturer à la seconde, les intervalles plus longs sont arrondis à l’intervalle supérieur.",
     "Enter 6-digit code": "Saisir le code à 6 chiffres",
     "Enter a domain such as example.com or localhost, without a protocol, port or path. Put addresses with ports in Allowed Passkey websites.": "Saisissez un domaine comme example.com ou localhost, sans protocole, port ni chemin. Placez les adresses avec un port dans « Sites autorisés pour les Passkeys ».",
     "Enter a finite, non-negative price": "Saisissez un prix fini et positif ou nul",
