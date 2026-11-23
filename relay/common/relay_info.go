@@ -288,7 +288,11 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	if channelType == constant.ChannelTypeAdvancedCustom &&
 		!channelMeta.ChannelSetting.PassThroughBodyEnabled &&
 		c.Request != nil && c.Request.URL != nil {
-		route, matched := channelMeta.ChannelOtherSettings.AdvancedCustom.MatchPathForModel(c.Request.URL.Path, info.OriginModelName)
+		path := c.Request.URL.Path
+		if info.IsPlayground && info.RelayFormat == types.RelayFormatOpenAIImage {
+			path, _, _ = strings.Cut(info.RequestURLPath, "?")
+		}
+		route, matched := channelMeta.ChannelOtherSettings.AdvancedCustom.MatchPathForModel(path, info.OriginModelName)
 		if matched && route.PassThroughBodyEnabled {
 			channelMeta.ChannelSetting.PassThroughBodyEnabled = true
 		}

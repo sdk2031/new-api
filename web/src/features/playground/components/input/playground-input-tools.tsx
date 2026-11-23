@@ -49,6 +49,7 @@ import { PlaygroundParameterPanel } from './playground-parameter-panel'
 type PlaygroundInputToolsProps = {
   config: PlaygroundConfig
   disabled?: boolean
+  isImageMode?: boolean
   hasMessages?: boolean
   onClearMessages?: () => void
   onConfigChange: <K extends keyof PlaygroundConfig>(
@@ -65,6 +66,7 @@ type PlaygroundInputToolsProps = {
 export function PlaygroundInputTools({
   config,
   disabled,
+  isImageMode = false,
   hasMessages = false,
   onClearMessages,
   onConfigChange,
@@ -95,67 +97,71 @@ export function PlaygroundInputTools({
   return (
     <>
       <PromptInputTools className='bg-background/70 border-border/60 rounded-lg border p-1 shadow-xs'>
-        <Tooltip>
-          <DropdownMenu>
-            <TooltipTrigger
-              render={
-                <DropdownMenuTrigger
+        {!isImageMode && (
+          <>
+            <Tooltip>
+              <DropdownMenu>
+                <TooltipTrigger
                   render={
-                    <PromptInputButton
-                      aria-label={t('Attach')}
-                      className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
-                      disabled={disabled}
-                      variant='ghost'
-                    />
+                    <DropdownMenuTrigger
+                      render={
+                        <PromptInputButton
+                          aria-label={t('Attach')}
+                          className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
+                          disabled={disabled}
+                          variant='ghost'
+                        />
+                      }
+                    >
+                      <PaperclipIcon size={16} />
+                    </DropdownMenuTrigger>
                   }
-                >
-                  <PaperclipIcon size={16} />
-                </DropdownMenuTrigger>
-              }
+                />
+                <TooltipContent>
+                  <p>{t('Attach')}</p>
+                </TooltipContent>
+                <DropdownMenuContent align='start'>
+                  {ATTACHMENT_ACTIONS.map(({ action, icon: Icon, label }) => (
+                    <DropdownMenuItem
+                      key={action}
+                      onClick={() => handleFileAction(action)}
+                    >
+                      <Icon className='mr-2' size={16} />
+                      {t(label)}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <PromptInputButton
+                    aria-label={t('Search')}
+                    className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
+                    disabled={disabled}
+                    onClick={handleSearchAction}
+                    variant='ghost'
+                  >
+                    <GlobeIcon size={16} />
+                  </PromptInputButton>
+                }
+              />
+              <TooltipContent>
+                <p>{t('Search')}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <PlaygroundParameterPanel
+              config={config}
+              disabled={disabled}
+              onConfigChange={onConfigChange}
+              onParameterEnabledChange={onParameterEnabledChange}
+              parameterEnabled={parameterEnabled}
             />
-            <TooltipContent>
-              <p>{t('Attach')}</p>
-            </TooltipContent>
-            <DropdownMenuContent align='start'>
-              {ATTACHMENT_ACTIONS.map(({ action, icon: Icon, label }) => (
-                <DropdownMenuItem
-                  key={action}
-                  onClick={() => handleFileAction(action)}
-                >
-                  <Icon className='mr-2' size={16} />
-                  {t(label)}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <PromptInputButton
-                aria-label={t('Search')}
-                className='text-muted-foreground hover:text-foreground hover:bg-muted/70 font-medium'
-                disabled={disabled}
-                onClick={handleSearchAction}
-                variant='ghost'
-              >
-                <GlobeIcon size={16} />
-              </PromptInputButton>
-            }
-          />
-          <TooltipContent>
-            <p>{t('Search')}</p>
-          </TooltipContent>
-        </Tooltip>
-
-        <PlaygroundParameterPanel
-          config={config}
-          disabled={disabled}
-          onConfigChange={onConfigChange}
-          onParameterEnabledChange={onParameterEnabledChange}
-          parameterEnabled={parameterEnabled}
-        />
+          </>
+        )}
 
         <Tooltip>
           <TooltipTrigger

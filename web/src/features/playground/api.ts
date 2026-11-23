@@ -25,7 +25,50 @@ import type {
   ChatCompletionResponse,
   ModelOption,
   GroupOption,
+  PlaygroundImageRequest,
 } from './types'
+
+export const PLAYGROUND_IMAGE_PATH =
+  /^\/pg\/images\/result\/[a-f0-9-]{36}\.(png|jpg|webp|gif)$/
+
+export async function sendPlaygroundImage(
+  request: PlaygroundImageRequest,
+  prompt: string,
+  signal: AbortSignal
+): Promise<string[]> {
+  const fields = {
+    model: request.model,
+    prompt,
+    size: request.size || undefined,
+  }
+  let payload: FormData | (typeof fields & { image?: string[] })
+  let endpoint = '/pg/images/generations'
+  if (request.mode === 'edit') {
+    endpoint = '/pg/images/edits'
+    payload = new FormData()
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined) payload.append(key, value)
+    }
+    for (const file of request.files ?? []) {
+      payload.append('image', file)
+    }
+  } else {
+    payload = { ...fields, image: request.references }
+  }
+
+  const response = await api.post<{ data?: { url: string }[] }>(
+    endpoint,
+    payload,
+    {
+      params: { group: request.group },
+      signal,
+      skipErrorHandler: true,
+    }
+  )
+  return (response.data.data ?? [])
+    .map((image) => image.url)
+    .filter((url) => typeof url === 'string' && PLAYGROUND_IMAGE_PATH.test(url))
+}
 
 /**
  * Send chat completion request (non-streaming)

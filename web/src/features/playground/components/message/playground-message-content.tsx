@@ -51,6 +51,7 @@ import { getMessageContentStyles } from '../../lib/message/message-styles'
 import type { Message } from '../../types'
 import { MessageError } from './message-error'
 import { MessageMetadata } from './message-metadata'
+import { PlaygroundResultImage } from './playground-result-image'
 
 type PlaygroundMessageContentProps = {
   actions: ReactNode
@@ -162,6 +163,15 @@ export function PlaygroundMessageContent({
           {actions}
         </>
       )}
+      {!isError && message.imageUrls?.length ? (
+        <div className='grid w-full gap-3 py-2 sm:max-w-xl'>
+          {message.imageUrls.map((path) => (
+            <PlaygroundResultImage key={path} path={path} />
+          ))}
+          <MessageMetadata alignment={alignment} message={message} />
+          {actions}
+        </div>
+      ) : null}
     </div>
   )
 }

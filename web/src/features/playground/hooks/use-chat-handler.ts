@@ -21,7 +21,7 @@ import { useTranslation } from 'react-i18next'
 
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { sendChatCompletion } from '../api'
+import { sendChatCompletion, sendPlaygroundImage } from '../api'
 import { ERROR_MESSAGES } from '../constants'
 import {
   applyStreamingChunk,
@@ -34,6 +34,8 @@ import {
   hasChatCompletionChoice,
   isAssistantMessageFinal,
   isAssistantMessagePending,
+  getMessageContent,
+  getPreviousUserMessage,
 } from '../lib'
 import type { Message, PlaygroundConfig, ParameterEnabled } from '../types'
 import { useStreamRequest } from './use-stream-request'
@@ -275,12 +277,7 @@ export function useChatHandler({
 
   // Send non-streaming chat request
   const sendNonStreamingChat = useCallback(
-    async (messages: Message[]) => {
-      const payload = buildChatCompletionPayload(
-        messages,
-        config,
-        parameterEnabled
-      )
+    async (messages: Message[], userMessage: Message | null) => {
       const generation = requestGenerationRef.current + 1
       const abortController = new AbortController()
 
@@ -292,6 +289,47 @@ export function useChatHandler({
 
       try {
         setIsRequesting(true)
+        if (userMessage?.imageRequest) {
+          const request = userMessage.imageRequest
+          if (request.mode === 'edit' && !request.files?.length) {
+            handleStreamError(
+              generation,
+              t('Attach the reference images again and send a new request.')
+            )
+            return
+          }
+          const imageUrls = await sendPlaygroundImage(
+            request,
+            getMessageContent(userMessage),
+            abortController.signal
+          )
+          if (
+            abortController.signal.aborted ||
+            generation !== requestGenerationRef.current
+          )
+            return
+          if (imageUrls.length === 0) {
+            handleStreamError(generation, t('No generated image was returned.'))
+            return
+          }
+          onMessageUpdate((prev) => {
+            if (generation !== requestGenerationRef.current) return prev
+            return updateLastAssistantMessage(prev, (message) =>
+              completeAssistantMessage({
+                ...message,
+                imageTurn: true,
+                imageUrls,
+              })
+            )
+          })
+          return
+        }
+
+        const payload = buildChatCompletionPayload(
+          messages,
+          config,
+          parameterEnabled
+        )
         const response = await sendChatCompletion(
           payload,
           abortController.signal
@@ -328,6 +366,14 @@ export function useChatHandler({
         }
 
         const { errorCode, errorMessage } = parseRequestErrorDetails(error)
+        if (errorCode === 'playground_image_storage_failed') {
+          handleStreamError(
+            generation,
+            t('Image result could not be saved.'),
+            errorCode
+          )
+          return
+        }
         handleStreamError(generation, errorMessage, errorCode)
       } finally {
         if (requestGenerationRef.current === generation) {
@@ -343,16 +389,18 @@ export function useChatHandler({
       discardPendingStreamUpdates,
       onMessageUpdate,
       handleStreamError,
+      t,
     ]
   )
 
   // Send chat request (stream or non-stream based on config)
   const sendChat = useCallback(
     (messages: Message[]) => {
-      if (config.stream) {
+      const userMessage = getPreviousUserMessage(messages, messages.length)
+      if (config.stream && !userMessage?.imageRequest) {
         sendStreamingChat(messages)
       } else {
-        sendNonStreamingChat(messages)
+        sendNonStreamingChat(messages, userMessage)
       }
     },
     [config.stream, sendStreamingChat, sendNonStreamingChat]

@@ -86,6 +86,17 @@ const messageSchema = z.object({
   isContentComplete: z.boolean().optional(),
   status: messageStatusSchema.optional(),
   errorCode: z.string().nullable().optional(),
+  imageTurn: z.boolean().optional(),
+  imageUrls: z.array(z.string()).optional(),
+  imageRequest: z
+    .object({
+      mode: z.enum(['generate', 'edit']),
+      model: z.string(),
+      group: z.string(),
+      size: z.string().optional(),
+      references: z.array(z.string()).optional(),
+    })
+    .optional(),
 })
 
 export const messagesSchema = z.array(messageSchema)

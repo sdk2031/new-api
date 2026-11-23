@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useState } from 'react'
+
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundInput } from './components/input/playground-input'
 import {
@@ -24,8 +26,10 @@ import {
   usePlaygroundOptions,
   usePlaygroundState,
 } from './hooks'
+import type { PlaygroundMode } from './types'
 
 export function Playground() {
+  const [mode, setMode] = useState<PlaygroundMode>('chat')
   const {
     config,
     parameterEnabled,
@@ -84,7 +88,7 @@ export function Playground() {
           onRegenerateMessage={handleRegenerateMessage}
           onEditMessage={handleEditMessage}
           onDeleteMessage={handleDeleteMessage}
-          onSelectPrompt={handleSendMessage}
+          onSelectPrompt={mode === 'chat' ? handleSendMessage : undefined}
           isGenerating={isGenerating}
           editingKey={editingMessageKey}
           onCancelEdit={handleEditOpenChange}
@@ -97,6 +101,8 @@ export function Playground() {
       <div className='mx-auto w-full max-w-4xl'>
         <PlaygroundInput
           config={config}
+          mode={mode}
+          onModeChange={setMode}
           disabled={isGenerating}
           groups={groups}
           groupValue={config.group}

@@ -608,8 +608,8 @@ export const STATIC_I18N_KEYS = [
 
   // Sidebar modules
   'Chat Area',
-  'Playground and chat functions',
-  'Playground',
+  'Online chat and image generation',
+  'Online chat',
   'AI model testing environment',
   'Chat session management',
   'No content to copy',

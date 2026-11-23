@@ -13,6 +13,10 @@ import (
 )
 
 func Playground(c *gin.Context) {
+	relayPlayground(c, types.RelayFormatOpenAI)
+}
+
+func relayPlayground(c *gin.Context, format types.RelayFormat) {
 	var newAPIError *types.NewAPIError
 
 	defer func() {
@@ -52,5 +56,5 @@ func Playground(c *gin.Context) {
 	}
 	_ = middleware.SetupContextForToken(c, tempToken)
 
-	Relay(c, types.RelayFormatOpenAI)
+	Relay(c, format)
 }

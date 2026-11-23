@@ -129,7 +129,12 @@ export function MessageActions({
     })
   }
 
-  if ((isAssistant || isUser) && hasContent && !isLoading && onRegenerate) {
+  if (
+    (isAssistant || isUser) &&
+    (hasContent || message.imageUrls?.length) &&
+    !isLoading &&
+    onRegenerate
+  ) {
     actions.push({
       disabled: isGenerating,
       icon: RefreshCw,

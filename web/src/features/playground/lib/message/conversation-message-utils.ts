@@ -35,7 +35,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { Message } from '../../types'
+import type { Message, PlaygroundImageRequest } from '../../types'
 import {
   createLoadingAssistantMessage,
   createUserMessage,
@@ -56,14 +56,18 @@ type ChatMessageRenderState = {
 
 export function appendUserMessagePair(
   messages: Message[],
-  content: string
+  content: string,
+  imageRequest?: PlaygroundImageRequest
 ): Message[] {
   const submittedAt = Date.now()
 
   return [
     ...messages,
-    createUserMessage(content, submittedAt),
-    createLoadingAssistantMessage(submittedAt),
+    { ...createUserMessage(content, submittedAt), imageRequest },
+    {
+      ...createLoadingAssistantMessage(submittedAt),
+      imageTurn: Boolean(imageRequest),
+    },
   ]
 }
 
@@ -82,11 +86,21 @@ export function createRegeneratedMessages(
   if (messages[messageIndex].from === MESSAGE_ROLES.USER) {
     return [
       ...messages.slice(0, messageIndex + 1),
-      createLoadingAssistantMessage(),
+      {
+        ...createLoadingAssistantMessage(),
+        imageTurn: Boolean(messages[messageIndex].imageRequest),
+      },
     ]
   }
 
-  return [...messages.slice(0, messageIndex), createLoadingAssistantMessage()]
+  const previousUser = getPreviousUserMessage(messages, messageIndex)
+  return [
+    ...messages.slice(0, messageIndex),
+    {
+      ...createLoadingAssistantMessage(),
+      imageTurn: Boolean(previousUser?.imageRequest),
+    },
+  ]
 }
 
 export function removeMessageByKey(
@@ -143,7 +157,10 @@ export function applyMessageEdit(
   return {
     messages: [
       ...updatedMessages.slice(0, messageIndex + 1),
-      createLoadingAssistantMessage(submittedAt),
+      {
+        ...createLoadingAssistantMessage(submittedAt),
+        imageTurn: Boolean(updatedMessages[messageIndex].imageRequest),
+      },
     ],
     shouldSend: true,
   }

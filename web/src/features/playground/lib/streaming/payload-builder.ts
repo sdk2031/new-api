@@ -34,7 +34,10 @@ export function buildChatCompletionPayload(
 ): ChatCompletionRequest {
   // Filter and format valid messages
   const processedMessages = messages
-    .filter(isValidMessage)
+    .filter(
+      (message) =>
+        !message.imageRequest && !message.imageTurn && isValidMessage(message)
+    )
     .map(formatMessageForAPI)
 
   const payload: ChatCompletionRequest = {

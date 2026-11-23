@@ -373,6 +373,9 @@ func (a *Adaptor) resolve(c *gin.Context, info *relaycommon.RelayInfo) error {
 }
 
 func incomingRequestPath(c *gin.Context, info *relaycommon.RelayInfo) string {
+	if info != nil && info.IsPlayground && info.RelayFormat == types.RelayFormatOpenAIImage {
+		return strings.Split(info.RequestURLPath, "?")[0]
+	}
 	if c != nil && c.Request != nil && c.Request.URL != nil {
 		return c.Request.URL.Path
 	}

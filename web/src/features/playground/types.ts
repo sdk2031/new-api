@@ -23,6 +23,17 @@ export type MessageStatus = 'loading' | 'streaming' | 'complete' | 'error'
 
 export type PlaygroundMessageLayoutMode = 'alternating' | 'left'
 
+export type PlaygroundMode = 'chat' | 'generate' | 'edit'
+
+export type PlaygroundImageRequest = {
+  mode: Exclude<PlaygroundMode, 'chat'>
+  model: string
+  group: string
+  size?: string
+  references?: string[]
+  files?: File[]
+}
+
 export interface MessageVersion {
   id: string
   content: string
@@ -49,6 +60,9 @@ export interface Message {
   isContentComplete?: boolean
   status?: MessageStatus
   errorCode?: string | null
+  imageRequest?: PlaygroundImageRequest
+  imageTurn?: boolean
+  imageUrls?: string[]
 }
 
 // API payload types
