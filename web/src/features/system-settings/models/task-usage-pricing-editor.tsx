@@ -67,6 +67,7 @@ import {
 import {
   parseBillingInterval,
   parseDurationPrice,
+  parseResolutionDurationTiers,
   type DurationPrice,
 } from '@/features/pricing/lib/task-matrix-display'
 import {
@@ -95,6 +96,29 @@ type TaskUsagePricingEditorProps = {
 }
 
 type EditorMode = 'visual' | 'raw' | 'duration'
+
+type DurationRates = DurationPrice & {
+  resolutionPrices?: Record<string, number>
+}
+
+function readDurationRates(
+  expression: string,
+  field: string | undefined,
+  resolutions: readonly string[]
+): DurationRates | null {
+  if (!field) return null
+  const uniform = parseDurationPrice(expression, field)
+  if (uniform) return uniform
+  const tiers = parseResolutionDurationTiers(expression, field, resolutions)
+  if (!tiers) return null
+  return {
+    interval: tiers[0].billingInterval ?? 1,
+    price: tiers[0].unitPrices[field],
+    resolutionPrices: Object.fromEntries(
+      tiers.map((tier) => [tier.label, tier.unitPrices[field]])
+    ),
+  }
+}
 
 type TaskBillingPreviewProps = {
   currency?: PricingCurrency
@@ -291,9 +315,19 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
   )
   const durationField =
     durationFields.length === 1 ? durationFields[0][0] : undefined
-  const [durationPrice, setDurationPrice] = useState<DurationPrice>(
+  const resolutions = durationField
+    ? (props.usageSchema.resolution?.enum ?? [])
+    : []
+  const visualSchema = resolutions.length
+    ? Object.fromEntries(
+        Object.entries(props.usageSchema).filter(
+          ([field]) => field !== 'aspect_ratio'
+        )
+      )
+    : props.usageSchema
+  const [durationPrice, setDurationPrice] = useState<DurationRates>(
     () =>
-      parseDurationPrice(props.billingExpr, durationField) ?? {
+      readDurationRates(props.billingExpr, durationField, resolutions) ?? {
         interval: 1,
         price: 0,
       }
@@ -309,23 +343,21 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
   const durationModeId = useId()
   const [editorMode, setEditorMode] = useState<EditorMode>(() => {
     if (
-      parseDurationPrice(props.billingExpr, durationField) &&
-      (props.billingExpr.trim().startsWith('tier("duration",') ||
+      readDurationRates(props.billingExpr, durationField, resolutions) &&
+      (durationPrice.resolutionPrices ||
+        props.billingExpr.trim().startsWith('tier("duration",') ||
         durationPrice.interval > 1)
     ) {
       return 'duration'
     }
     return props.billingExpr &&
-      !tryParseTaskMatrixConfig(props.billingExpr, props.usageSchema)
+      !tryParseTaskMatrixConfig(props.billingExpr, visualSchema)
       ? 'raw'
       : 'visual'
   })
   const [matrixRows, setMatrixRows] = useState<TaskMatrixRow[]>(() => {
-    const parsed = tryParseTaskMatrixConfig(
-      props.billingExpr,
-      props.usageSchema
-    )
-    return (parsed ?? createDefaultTaskMatrixConfig(props.usageSchema)).rows
+    const parsed = tryParseTaskMatrixConfig(props.billingExpr, visualSchema)
+    return (parsed ?? createDefaultTaskMatrixConfig(visualSchema)).rows
   })
   const [confirmVisualSwitch, setConfirmVisualSwitch] = useState(false)
   const [confirmDurationSwitch, setConfirmDurationSwitch] = useState(false)
@@ -347,10 +379,10 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     }
     return sample
   })
-  const enumFields = getTaskEnumFields(props.usageSchema)
+  const enumFields = getTaskEnumFields(visualSchema)
   const numberFields = getTaskNumberFields(props.usageSchema)
-  const combinations = getTaskEnumCombinations(props.usageSchema)
-  const visualTiers = taskMatrixToTiers({ rows: matrixRows }, props.usageSchema)
+  const combinations = getTaskEnumCombinations(visualSchema)
+  const visualTiers = taskMatrixToTiers({ rows: matrixRows }, visualSchema)
 
   let previewConfig: TaskVisualConfig | null = null
   let previewRequestRuleExpr = props.requestRuleExpr
@@ -358,7 +390,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
   if (editorMode === 'visual') {
     const generatedExpression = generateTaskExprFromConfig(
       { tiers: visualTiers },
-      props.usageSchema
+      visualSchema
     )
     if (generatedExpression) previewConfig = { tiers: visualTiers }
     const nextMatchedRowIndex = combinations.findIndex((combination) =>
@@ -383,9 +415,9 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     props.onBillingExprChange(
       generateTaskExprFromConfig(
         {
-          tiers: taskMatrixToTiers({ rows: nextRows }, props.usageSchema),
+          tiers: taskMatrixToTiers({ rows: nextRows }, visualSchema),
         },
-        props.usageSchema
+        visualSchema
       )
     )
   }
@@ -419,20 +451,27 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
       ? combineBillingExpr(props.billingExpr, props.requestRuleExpr)
       : rawExpr
   )
-  const rawMatrix = tryParseTaskMatrixConfig(
-    rawSplit.billingExpr,
-    props.usageSchema
-  )
+  const rawMatrix = tryParseTaskMatrixConfig(rawSplit.billingExpr, visualSchema)
 
-  const publishDurationPrice = (next: DurationPrice) => {
+  const publishDurationPrice = (next: DurationRates) => {
     if (!durationField) return
     setDurationPrice(next)
     const usage = `u(${JSON.stringify(durationField)})`
     const quantity =
       next.interval > 1 ? `ceil(${usage} / ${next.interval})` : usage
-    props.onBillingExprChange(
-      `tier("duration", ${quantity} * ${formatPricingNumber(next.price)})`
-    )
+    const tier = (price: number) =>
+      `tier("duration", ${quantity} * ${formatPricingNumber(price)})`
+    if (resolutions.length > 1 && next.resolutionPrices) {
+      const branches = resolutions.map((resolution, index) => {
+        const value = tier(next.resolutionPrices?.[resolution] ?? next.price)
+        return index === resolutions.length - 1
+          ? value
+          : `u("resolution") == ${JSON.stringify(resolution)} ? ${value}`
+      })
+      props.onBillingExprChange(branches.join(' : '))
+    } else {
+      props.onBillingExprChange(tier(next.price))
+    }
   }
 
   const setDurationBillingMode = (mode: unknown) => {
@@ -442,17 +481,33 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     // Keep the price for a full interval equivalent when switching units.
     const price = (durationPrice.price / durationPrice.interval) * interval
     if (!Number.isFinite(price)) return
+    let resolutionPrices: Record<string, number> | undefined
+    if (durationPrice.resolutionPrices) {
+      resolutionPrices = {}
+      for (const [resolution, oldPrice] of Object.entries(
+        durationPrice.resolutionPrices
+      )) {
+        const nextPrice = (oldPrice / durationPrice.interval) * interval
+        if (!Number.isFinite(nextPrice)) return
+        resolutionPrices[resolution] = Number(formatPricingNumber(nextPrice))
+      }
+    }
     if (mode === 'block') setIntervalDraft(String(interval))
     publishDurationPrice({
       interval,
       price: Number(formatPricingNumber(price)),
+      resolutionPrices,
     })
   }
 
   const handleModeChange = (nextMode: EditorMode) => {
     if (nextMode === editorMode) return
     if (nextMode === 'duration') {
-      const current = parseDurationPrice(props.billingExpr, durationField)
+      const current = readDurationRates(
+        props.billingExpr,
+        durationField,
+        resolutions
+      )
       if (props.billingExpr && !current) {
         setConfirmDurationSwitch(true)
         return
@@ -472,14 +527,13 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
   }
 
   const handleConfirmVisualSwitch = () => {
-    const nextRows = (
-      rawMatrix ?? createDefaultTaskMatrixConfig(props.usageSchema)
-    ).rows
+    const nextRows = (rawMatrix ?? createDefaultTaskMatrixConfig(visualSchema))
+      .rows
     setMatrixRows(nextRows)
     props.onBillingExprChange(
       generateTaskExprFromConfig(
-        { tiers: taskMatrixToTiers({ rows: nextRows }, props.usageSchema) },
-        props.usageSchema
+        { tiers: taskMatrixToTiers({ rows: nextRows }, visualSchema) },
+        visualSchema
       )
     )
     props.onRequestRuleExprChange(rawMatrix ? rawSplit.requestRuleExpr : '')
@@ -504,7 +558,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     )
   } else if (editorMode === 'visual') {
     simulationExpression = combineBillingExpr(
-      generateTaskExprFromConfig({ tiers: visualTiers }, props.usageSchema),
+      generateTaskExprFromConfig({ tiers: visualTiers }, visualSchema),
       props.requestRuleExpr
     )
   }
@@ -513,10 +567,15 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     ? t('Price per billing interval')
     : t('Price per second')
   const previewSeconds = Number(previewSample[durationField ?? ''] ?? 0)
+  const selectedResolution = String(
+    previewSample.resolution ?? resolutions[0] ?? ''
+  )
+  const selectedDurationPrice =
+    durationPrice.resolutionPrices?.[selectedResolution] ?? durationPrice.price
   const previewBaseCost =
     (blockPricing
       ? Math.ceil(previewSeconds / durationPrice.interval)
-      : previewSeconds) * durationPrice.price
+      : previewSeconds) * selectedDurationPrice
 
   return (
     <div className='space-y-5'>
@@ -630,6 +689,54 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                 </div>
               </RadioGroup>
             </Field>
+            {resolutions.length > 0 && (
+              <Field className='sm:col-span-2'>
+                <FieldLabel>
+                  {taskPriceLabel(
+                    props.usageSchema.resolution?.description,
+                    'resolution',
+                    i18n.language
+                  )}
+                </FieldLabel>
+                <Select
+                  value={selectedResolution}
+                  onValueChange={(value) => {
+                    if (value !== null) {
+                      handlePreviewSampleChange('resolution', value)
+                    }
+                  }}
+                  items={resolutions.map((value) => ({
+                    value,
+                    label: taskEnumLabel(
+                      props.usageSchema.resolution,
+                      value,
+                      i18n.language
+                    ),
+                  }))}
+                >
+                  <SelectTrigger
+                    aria-label={taskPriceLabel(
+                      props.usageSchema.resolution?.description,
+                      'resolution',
+                      i18n.language
+                    )}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {resolutions.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {taskEnumLabel(
+                          props.usageSchema.resolution,
+                          value,
+                          i18n.language
+                        )}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
             {blockPricing && (
               <Field>
                 <FieldLabel>{t('Billing interval')}</FieldLabel>
@@ -674,17 +781,33 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
             <Field className={blockPricing ? undefined : 'sm:col-span-2'}>
               <FieldLabel>{durationPriceLabel}</FieldLabel>
               <PricingAmountInput
-                key={blockPricing ? 'block' : 'second'}
+                key={`${blockPricing ? 'block' : 'second'}-${selectedResolution}`}
                 currency={props.currency}
                 aria-label={durationPriceLabel}
                 disabled={blockPricing && validInterval === null}
-                value={durationPrice.price}
-                onChange={(value) =>
+                value={selectedDurationPrice}
+                onChange={(value) => {
+                  const price = Number(value)
+                  if (resolutions.length <= 1) {
+                    publishDurationPrice({ ...durationPrice, price })
+                    return
+                  }
+                  const resolutionPrices =
+                    durationPrice.resolutionPrices ??
+                    Object.fromEntries(
+                      resolutions.map((resolution) => [
+                        resolution,
+                        durationPrice.price,
+                      ])
+                    )
                   publishDurationPrice({
                     ...durationPrice,
-                    price: Number(value),
+                    resolutionPrices: {
+                      ...resolutionPrices,
+                      [selectedResolution]: price,
+                    },
                   })
-                }
+                }}
               />
             </Field>
             <Field className='sm:col-span-2'>
@@ -726,7 +849,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                 <TaskPricingMatrix
                   currency={props.currency}
                   rows={matrixRows}
-                  usageSchema={props.usageSchema}
+                  usageSchema={visualSchema}
                   matchedRowIndex={matchedRowIndex}
                   onRowChange={handleRowChange}
                   onFillColumn={handleFillColumn}
@@ -849,7 +972,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
               config={previewConfig}
               requestRuleExpr={previewRequestRuleExpr}
               sample={previewSample}
-              usageSchema={props.usageSchema}
+              usageSchema={visualSchema}
               usageExamples={props.usageExamples}
               onSampleChange={handlePreviewSampleChange}
               onSampleReplace={setPreviewSample}

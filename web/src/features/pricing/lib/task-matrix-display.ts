@@ -23,6 +23,7 @@ import {
   type ParsedTaskTier,
   type TaskTierCondition,
 } from './billing-expr'
+import { compileBillingExpression } from './billing-expression/parser'
 import {
   getTaskNumberFields,
   getTaskEnumFields,
@@ -55,6 +56,70 @@ export function parseDurationPrice(
   if (interval === null || !Number.isFinite(price) || price < 0) return null
   if (match[1] && interval === 1) return null
   return { interval, price }
+}
+
+export function parseResolutionDurationTiers(
+  expression: string,
+  field: string,
+  resolutions: readonly string[]
+): ParsedTaskTier[] | null {
+  if (resolutions.length < 2) return null
+  const { billingExpr } = splitBillingExprAndRequestRules(expression)
+  const compiled = compileBillingExpression(billingExpr)
+  if (compiled.status !== 'ready') return null
+  const tiers: ParsedTaskTier[] = []
+  const remaining = new Set(resolutions)
+  let node = compiled.ast
+  let interval: number | undefined
+  while (node.kind === 'conditional') {
+    const condition = node.condition
+    if (
+      condition.kind !== 'binary' ||
+      condition.operator !== '==' ||
+      condition.left.kind !== 'call' ||
+      condition.left.name !== 'u' ||
+      condition.left.args[0].kind !== 'literal' ||
+      condition.left.args[0].value !== 'resolution' ||
+      condition.right.kind !== 'literal' ||
+      typeof condition.right.value !== 'string' ||
+      !remaining.delete(condition.right.value)
+    ) {
+      return null
+    }
+    const rate = parseDurationPrice(
+      billingExpr.slice(node.yes.start, node.yes.end),
+      field
+    )
+    if (!rate || (interval !== undefined && interval !== rate.interval)) {
+      return null
+    }
+    interval = rate.interval
+    tiers.push({
+      label: condition.right.value,
+      conditions: [{ field: 'resolution', value: condition.right.value }],
+      constant: 0,
+      unitPrices: { [field]: rate.price },
+      billingInterval: rate.interval > 1 ? rate.interval : undefined,
+    })
+    node = node.no
+  }
+  if (remaining.size !== 1 || interval === undefined) return null
+  const fallback = parseDurationPrice(
+    billingExpr.slice(node.start, node.end),
+    field
+  )
+  if (!fallback || fallback.interval !== interval) return null
+  const [resolution] = remaining
+  return [
+    ...tiers,
+    {
+      label: resolution,
+      conditions: [{ field: 'resolution', value: resolution }],
+      constant: 0,
+      unitPrices: { [field]: fallback.price },
+      billingInterval: interval > 1 ? interval : undefined,
+    },
+  ]
 }
 
 const durationDisplaySchema: BillingUsageSchema = {
@@ -113,6 +178,12 @@ export function getTaskPricingDisplayTiers(
   )
   if (durationFields.length === 1) {
     const [field] = durationFields[0]
+    const resolutionTiers = parseResolutionDurationTiers(
+      expression || '',
+      field,
+      schema?.resolution?.enum ?? []
+    )
+    if (resolutionTiers) return resolutionTiers
     const duration = parseDurationPrice(expression || '', field)
     if (duration && duration.interval > 1) {
       return [

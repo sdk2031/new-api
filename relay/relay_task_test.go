@@ -212,6 +212,9 @@ func TestFokeVideoTask(t *testing.T) {
 	decoded, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, ctx)
 	require.NoError(t, err)
 	normalized := decoded.(map[string]any)["requestBody"]
+	facts, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{"requestBody": normalized})
+	require.NoError(t, err)
+	assert.Equal(t, "768p", facts.(map[string]any)["resolution"])
 	request["seconds"] = relaycommon.MaxTaskDurationSeconds + 1
 	_, err = plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, ctx)
 	require.ErrorContains(t, err, "positive integer")

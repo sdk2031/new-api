@@ -1,4 +1,5 @@
 const SUPPORTED_ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+const BILLING_RESOLUTIONS = ["360p", "480p", "540p", "576p", "720p", "768p", "1080p", "1440p", "2160p", "default"];
 
 export const meta = {
   apiVersion: 1,
@@ -9,7 +10,7 @@ export const meta = {
     en: "FDAI video generation and image response compatibility",
     zh: "FDAI 视频生成与图片响应兼容",
   },
-  version: "1.3.0",
+  version: "1.3.2",
   author: { name: "Duomi API" },
   baseUrl: "https://api.fdai.xyz",
   models: ["sd2.0_mini-720p-zr-903-12s", "sd2.0_mini-480p-zr-903-15s"],
@@ -25,6 +26,11 @@ export const meta = {
     aspect_ratio: {
       enum: SUPPORTED_ASPECT_RATIOS,
       description: { en: "Output video aspect ratio", zh: "输出视频宽高比" },
+    },
+    resolution: {
+      enum: BILLING_RESOLUTIONS,
+      description: { en: "Output video resolution", zh: "输出视频分辨率" },
+      enumLabels: { default: { en: "Other or unspecified", zh: "其他或未标注" } },
     },
   },
 };
@@ -201,9 +207,14 @@ export function parseSubmitResponse(_ctx, resp) {
 
 export function extractUsage(ctx) {
   const req = ctx.requestBody || {};
+  const model = trimmed(ctx.upstreamModel || ctx.model).toLowerCase();
+  // The FDAI submit protocol selects the resolution by model, not aspect_ratio.
+  const resolutions = new Set(model.split(/[^a-z0-9]+/).filter((part) => /^\d{3,4}p$/.test(part)));
+  const [resolution] = resolutions;
   return {
     seconds: Number(req.duration),
     aspect_ratio: req.aspect_ratio,
+    resolution: resolutions.size === 1 && BILLING_RESOLUTIONS.includes(resolution) ? resolution : "default",
   };
 }
 

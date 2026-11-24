@@ -50,6 +50,18 @@ func TestFDAIVideoCustomPlugin(t *testing.T) {
 		body := request["body"].(map[string]any)
 		assert.Equal(t, "sd2.0_mini-720p-zr-903-12s", body["model"])
 		assert.NotContains(t, body, "ignored")
+
+		for _, tc := range []struct{ upstream, resolution string }{
+			{"sd2.0_mini-720p-zr-903-12s", "720p"},
+			{"sd2.0_mini-480p-zr-903-15s", "480p"},
+			{"muse-video", "default"},
+		} {
+			facts, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
+				"model": "video-alias", "upstreamModel": tc.upstream, "requestBody": intent["requestBody"],
+			})
+			require.NoError(t, err)
+			assert.Equal(t, map[string]any{"seconds": int64(12), "aspect_ratio": "16:9", "resolution": tc.resolution}, facts)
+		}
 	})
 
 	t.Run("uses the v1 submit body only for veo and omni upstream models", func(t *testing.T) {

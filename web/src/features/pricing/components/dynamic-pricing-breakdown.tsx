@@ -399,10 +399,9 @@ export function DynamicPricingBreakdown({
           labelKind: 'schema' as const,
           unit: definition.unit as BillingUsageUnit,
           unitLabel: definition.unitLabel,
-          billingInterval:
-            tiers.length === 1 && isTaskBreakdownTier(tiers[0])
-              ? tiers[0].billingInterval
-              : undefined,
+          billingInterval: isTaskBreakdownTier(tiers[0])
+            ? tiers[0].billingInterval
+            : undefined,
           value: (tier: BreakdownTier) =>
             isTaskBreakdownTier(tier) ? Number(tier.unitPrices[field] || 0) : 0,
         }))

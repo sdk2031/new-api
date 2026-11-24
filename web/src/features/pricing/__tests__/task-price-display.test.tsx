@@ -100,6 +100,42 @@ const model: PricingModel = {
 }
 const clients: QueryClient[] = []
 
+it('shows each resolution and the shared interval in model group prices', () => {
+  vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <ModelDetailsContent
+        model={{
+          ...model,
+          billing_expr:
+            'u("resolution") == "480p" ? tier("duration", ceil(u("seconds") / 30) * 1.5) : tier("duration", ceil(u("seconds") / 30) * 3)',
+          billing_usage_schema: {
+            seconds: { type: 'number', unit: 'second' },
+            resolution: { enum: ['480p', '720p'], description: 'Resolution' },
+          },
+        }}
+        groupRatio={{ default: 2 }}
+        usableGroup={{ default: { desc: '', ratio: 2 } }}
+        endpointMap={{}}
+        autoGroups={[]}
+        priceRate={1}
+        usdExchangeRate={1}
+        tokenUnit='M'
+      />
+    </QueryClientProvider>
+  )
+  expect(screen.getByRole('columnheader', { name: /30 s/ })).toBeVisible()
+  expect(screen.getByRole('row', { name: /480p\s+\$3$/ })).toBeVisible()
+  expect(screen.getByRole('row', { name: /720p\s+\$6$/ })).toBeVisible()
+  expect(
+    screen.queryByText('Special billing expression')
+  ).not.toBeInTheDocument()
+})
+
 it.each<BillingUsageSchema | undefined>([
   { seconds: { type: 'number', unit: 'second' } },
   {},

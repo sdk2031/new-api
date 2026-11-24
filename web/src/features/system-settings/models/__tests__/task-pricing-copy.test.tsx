@@ -138,6 +138,7 @@ it('shows localized enum choices while preserving raw values in generated billin
 function TaskPricingDraft(props: {
   expression: string
   onChange: (next: string) => void
+  videoResolutions?: boolean
 }) {
   const [billingExpr, setBillingExpr] = useState(props.expression)
   const [requestRuleExpr, setRequestRuleExpr] = useState(
@@ -153,7 +154,12 @@ function TaskPricingDraft(props: {
           unit: 'second',
           description: 'Seconds price',
         },
-        mode: { enum: ['std', 'pro'] },
+        ...(props.videoResolutions
+          ? {
+              aspect_ratio: { enum: ['16:9', '9:16'] },
+              resolution: { enum: ['480p', '720p'], description: 'Resolution' },
+            }
+          : { mode: { enum: ['std', 'pro'] } }),
       }}
       onBillingExprChange={(next) => {
         setBillingExpr(next)
@@ -163,6 +169,47 @@ function TaskPricingDraft(props: {
     />
   )
 }
+
+it('edits video prices by resolution without presenting aspect ratio as a price condition', async () => {
+  const user = userEvent.setup()
+  const onChange = vi.fn()
+  const expression =
+    'u("resolution") == "480p" ? tier("duration", ceil(u("seconds") / 30) * 1.5) : tier("duration", ceil(u("seconds") / 30) * 3)'
+  const draft = render(
+    <TaskPricingDraft expression='' onChange={onChange} videoResolutions />
+  )
+  const table = screen.getByRole('table')
+  expect(within(table).getByText('Resolution')).toBeVisible()
+  expect(within(table).getByText('480p')).toBeVisible()
+  expect(within(table).getByText('720p')).toBeVisible()
+  expect(within(table).queryByText('16:9')).not.toBeInTheDocument()
+  draft.unmount()
+
+  render(
+    <TaskPricingDraft
+      expression={expression}
+      onChange={onChange}
+      videoResolutions
+    />
+  )
+  const price = screen.getByRole('textbox', {
+    name: 'Price per billing interval',
+  })
+  expect(price).toHaveValue('1.5')
+  await user.click(screen.getByRole('combobox', { name: 'Resolution' }))
+  await user.click(screen.getByRole('option', { name: '720p' }))
+  expect(screen.getByText('Preview base cost: $3')).toBeVisible()
+  fireEvent.change(
+    screen.getByRole('textbox', { name: 'Price per billing interval' }),
+    {
+      target: { value: '4' },
+    }
+  )
+  expect(onChange).toHaveBeenLastCalledWith(
+    'u("resolution") == "480p" ? tier("duration", ceil(u("seconds") / 30) * 1.5) : tier("duration", ceil(u("seconds") / 30) * 4)'
+  )
+  expect(screen.getByText('Preview base cost: $4')).toBeVisible()
+})
 
 it('lets users cancel or discard an unsupported expression and its request rules', async () => {
   const user = userEvent.setup()

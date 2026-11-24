@@ -1,5 +1,6 @@
 // The host also validates this billing quantity (MaxTaskDurationSeconds).
 const MAX_DURATION_SECONDS = 3600;
+const BILLING_RESOLUTIONS = ["360p", "480p", "540p", "576p", "720p", "768p", "1080p", "1440p", "2160p", "default"];
 const MEDIA_FIELDS = {
   input_reference: "images",
   images: "images",
@@ -11,7 +12,7 @@ export const meta = {
   apiVersion: 1,
   key: "foke-video",
   name: "Foke",
-  version: "1.0.0",
+  version: "1.0.1",
   author: { name: "Duomi API" },
   icon: "text:FK",
   description: { en: "Video generation via Foke", zh: "通过 Foke 生成视频" },
@@ -25,6 +26,11 @@ export const meta = {
       type: "number",
       unit: "second",
       description: { en: "Video generation unit price", zh: "视频生成单价" },
+    },
+    resolution: {
+      enum: BILLING_RESOLUTIONS,
+      description: { en: "Output video resolution", zh: "输出视频分辨率" },
+      enumLabels: { default: { en: "Other or unspecified", zh: "其他或未标注" } },
     },
     tokens: {
       type: "number",
@@ -41,8 +47,8 @@ export const meta = {
     },
   },
   usageExamples: [
-    { label: "10s", facts: { seconds: 10, tokens: 0, has_video_reference: false, token_settled: false } },
-    { label: "10s · reference video", facts: { seconds: 10, tokens: 180000, has_video_reference: true, token_settled: true } },
+    { label: "10s", facts: { seconds: 10, resolution: "720p", tokens: 0, has_video_reference: false, token_settled: false } },
+    { label: "10s · reference video", facts: { seconds: 10, resolution: "720p", tokens: 180000, has_video_reference: true, token_settled: true } },
   ],
 };
 
@@ -113,7 +119,7 @@ function decodeVideo(ctx) {
     throw new Error("Send reference files or HTTPS URLs, not both");
   }
 
-  const requestBody = { prompt, duration, ratio, resolution, imageUrls, videoUrls, audioUrls, fileParts };
+  const requestBody = { prompt, duration, ratio, outputResolution: resolution, imageUrls, videoUrls, audioUrls, fileParts };
   const extend = field("prompt_extend");
   if (extend !== undefined) {
     if (extend === true || (form && extend === "true")) requestBody.prompt_extend = true;
@@ -139,7 +145,7 @@ export function buildSubmitRequest(ctx) {
   if (!/^ft-video-v1-[a-zA-Z0-9_-]+$/.test(model)) throw new Error("Map the model to a Foke ft-video-v1 public model ID");
 
   const req = ctx.requestBody;
-  const body = { model, prompt: req.prompt, ratio: req.ratio, duration: req.duration, resolution: req.resolution };
+  const body = { model, prompt: req.prompt, ratio: req.ratio, duration: req.duration, resolution: req.outputResolution };
   if (req.prompt_extend !== undefined) body.prompt_extend = req.prompt_extend;
   const request = {
     url: ctx.baseUrl + "/api/open/v1/video/generate",
@@ -220,8 +226,10 @@ export function parseTaskResult(_ctx, body) {
 export function extractUsage(ctx) {
   if (ctx.usagePurpose === "billing_ratios") return null;
   const req = ctx.requestBody;
+  const resolution = text(req.outputResolution).toLowerCase();
   return {
     seconds: req.duration,
+    resolution: BILLING_RESOLUTIONS.includes(resolution) ? resolution : "default",
     tokens: 0,
     has_video_reference: req.videoUrls.length > 0 || req.fileParts.some((part) => part.name === "videos"),
     token_settled: false,
