@@ -1,8 +1,12 @@
 package relay
 
 import (
+	"bytes"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -182,6 +186,147 @@ func TestRelayTaskSubmitDoesNotApplyMappingTwice(t *testing.T) {
 	assert.Equal(t, "model_price_error", taskErr.Code)
 	assert.Equal(t, "rewritten", info.UpstreamModelName, "late mapping would overwrite rewriteModel with the chain tail")
 	assert.Equal(t, "alias-model", info.OriginModelName)
+}
+
+func TestFokeVideoTask(t *testing.T) {
+	source, err := os.ReadFile("../custom-plugins/foke-video/plugin.js")
+	require.NoError(t, err)
+	registry := pluginruntime.NewRegistry()
+	plugin, err := registry.Register(string(source), pluginruntime.Options{})
+	require.NoError(t, err)
+	require.Equal(t, "Foke", plugin.Meta.Name)
+
+	const publicModel = "video-alias"
+	const upstreamModel = "ft-video-v1-dynamic-catalog-entry"
+	const signedVideo = "https://media.example/video.mp4?exp=123&sig=signed%2Bvalue"
+	request := map[string]any{
+		"model": publicModel, "prompt": "A landscape", "seconds": 10,
+		"size": "16:9", "resolution": "768p", "prompt_extend": false,
+		"input_reference": "https://media.example/frame.jpg",
+		"videoUrls":       []any{"https://media.example/reference.mp4"},
+	}
+	ctx := map[string]any{"model": publicModel, "body": map[string]any{"kind": "json", "value": request}}
+	decoded, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, ctx)
+	require.NoError(t, err)
+	normalized := decoded.(map[string]any)["requestBody"]
+	request["seconds"] = relaycommon.MaxTaskDurationSeconds + 1
+	_, err = plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, ctx)
+	require.ErrorContains(t, err, "positive integer")
+
+	saveBillingConfig(t)
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode": `{"video-alias":"tiered_expr"}`,
+		"billing_setting.billing_expr": `{"video-alias":"u(\"seconds\") * 0.01"}`,
+	}))
+	service.InitHttpClient()
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		file       bool
+	}{
+		{"accepted JSON", `{"success":true,"jobId":"job-123","taskId":"provider-task","status":"submitted"}`, http.StatusAccepted, false},
+		{"accepted image file", `{"success":true,"jobId":"job-123","status":"submitted"}`, http.StatusOK, true},
+		{"upstream unavailable", `{"error":"temporarily unavailable"}`, http.StatusServiceUnavailable, false},
+		{"unconfirmed submission", `{"success":true}`, http.StatusOK, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodPost, r.Method)
+				assert.Equal(t, "/api/open/v1/video/generate", r.URL.Path)
+				assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+				assert.Equal(t, "1", r.Header.Get("X-Public-Model-Ids"))
+				if tc.file {
+					assert.Equal(t, upstreamModel, r.FormValue("model"))
+					assert.Equal(t, "10", r.FormValue("duration"))
+					file, _, openErr := r.FormFile("images")
+					if assert.NoError(t, openErr) {
+						defer file.Close()
+						data, readErr := io.ReadAll(file)
+						assert.NoError(t, readErr)
+						assert.Equal(t, "reference-data", string(data))
+					}
+				} else {
+					data, readErr := io.ReadAll(r.Body)
+					assert.NoError(t, readErr)
+					assert.JSONEq(t, `{"model":"ft-video-v1-dynamic-catalog-entry","prompt":"A landscape","ratio":"16:9","duration":10,"resolution":"768p","prompt_extend":false,"imageUrls":["https://media.example/frame.jpg"],"videoUrls":["https://media.example/reference.mp4"],"audioUrls":[]}`, string(data))
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer upstream.Close()
+
+			c, info := newTaskSubmitContext(t, publicModel, `{"video-alias":"ft-video-v1-dynamic-catalog-entry"}`)
+			c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Generation: registry.Generation(), Plugin: plugin})
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, upstream.URL)
+			common.SetContextKey(c, constant.ContextKeyChannelKey, "test-key")
+			info.OriginModelName, info.UserGroup, info.UsingGroup = publicModel, "default", "default"
+			info.Billing = &service.BillingSession{}
+			c.Set("task_request", normalized)
+			if tc.file {
+				fields := map[string][]string{"prompt": {"A landscape"}, "duration": {"10"}, "ratio": {"16:9"}, "resolution": {"768p"}}
+				decodedForm, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+					"model": publicModel, "body": map[string]any{"kind": "multipart", "fields": fields, "files": []map[string]string{{"field": "input_reference", "ref": "request_file:input_reference"}}},
+				})
+				require.NoError(t, err)
+				c.Set("task_request", decodedForm.(map[string]any)["requestBody"])
+				var input bytes.Buffer
+				writer := multipart.NewWriter(&input)
+				part, err := writer.CreateFormFile("input_reference", "frame.jpg")
+				require.NoError(t, err)
+				_, err = io.WriteString(part, "reference-data")
+				require.NoError(t, err)
+				require.NoError(t, writer.Close())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", &input)
+				c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+			}
+
+			result, taskErr := RelayTaskSubmit(c, info)
+			if tc.status >= 400 || tc.name == "unconfirmed submission" {
+				require.NotNil(t, taskErr)
+				assert.True(t, taskErr.NoRetry)
+				assert.Nil(t, result)
+				return
+			}
+			require.Nil(t, taskErr)
+			require.NotNil(t, result)
+			assert.Equal(t, "job-123", result.UpstreamTaskID)
+		})
+	}
+
+	query, err := plugin.Engine.Call(t.Context(), "buildQueryRequest", map[string]any{"baseUrl": "https://upstream.example", "taskId": "job+1", "apiKey": "test-key"})
+	require.NoError(t, err)
+	assert.Equal(t, "https://upstream.example/api/open/v1/video/status?jobId=job%2B1", query.(map[string]any)["url"])
+	for _, tc := range []struct {
+		status, wantStatus string
+		billing            map[string]any
+		hasURL             bool
+	}{
+		{"submitted", "IN_PROGRESS", nil, false},
+		{"failed", "FAILURE", nil, false},
+		{"success", "IN_PROGRESS", nil, false},
+		{"success", "IN_PROGRESS", map[string]any{"mode": "token", "settled": false}, true},
+		{"success", "SUCCESS", map[string]any{"mode": "token", "settled": true, "usage": map[string]any{"total_tokens": 12300}}, true},
+	} {
+		body := map[string]any{"success": true, "status": tc.status, "billing": tc.billing}
+		if tc.hasURL {
+			body["videoUrl"] = signedVideo
+		}
+		result, err := plugin.Engine.Call(t.Context(), "parseTaskResult", nil, body)
+		require.NoError(t, err)
+		assert.Equal(t, tc.wantStatus, result.(map[string]any)["status"])
+		if tc.wantStatus != "SUCCESS" {
+			continue
+		}
+		facts, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", nil, result, body)
+		require.NoError(t, err)
+		assert.EqualValues(t, 12300, facts.(map[string]any)["tokens"])
+		content, err := plugin.Engine.Call(t.Context(), "buildContentRequest", map[string]any{
+			"artifactKey": "video", "data": body, "clientRequest": map[string]any{"method": "GET"}, "apiKey": "test-key",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"url": signedVideo, "method": "GET", "credentialless": true}, content)
+	}
 }
 
 func TestRelayTaskSubmitEmptyOriginKeepsLateMapping(t *testing.T) {
