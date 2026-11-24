@@ -85,7 +85,7 @@ import {
   getTaskEnumFields,
   getTaskNumberFields,
 } from '../lib/task-expr'
-import { getTaskPricingDisplayTiers } from '../lib/task-matrix-display'
+import { getTaskPricingDisplaySchema } from '../lib/task-matrix-display'
 import {
   hasSimpleTaskPricing,
   taskPriceLabel,
@@ -1073,6 +1073,7 @@ function ProviderGroupPricingSection(
 ) {
   const { t, i18n } = useTranslation()
   const showRechargePrice = props.showRechargePrice ?? false
+  const usageSchema = getTaskPricingDisplaySchema(props.model)
 
   const availableGroups = useMemo(
     () => getAvailableGroups(props.model, props.usableGroup || {}),
@@ -1123,16 +1124,11 @@ function ProviderGroupPricingSection(
 
   const thClass = cn(
     'text-muted-foreground py-2 text-xs font-medium whitespace-normal break-words',
-    !props.model.billing_usage_schema && 'tracking-wider uppercase'
+    !usageSchema && 'tracking-wider uppercase'
   )
 
   if (isDynamicPricingModel(props.model)) {
-    const dynamicTiers = props.model.billing_usage_schema
-      ? getTaskPricingDisplayTiers(
-          props.model.billing_expr,
-          props.model.billing_usage_schema
-        )
-      : getDynamicPricingTiers(props.model)
+    const dynamicTiers = getDynamicPricingTiers(props.model)
     const hasRequestPrice = dynamicTiers.some(
       (tier) => !('unitPrices' in tier) && tier.billingUnit === 'request'
     )
@@ -1160,7 +1156,7 @@ function ProviderGroupPricingSection(
 
     const usageExampleRows = evaluateTaskUsageExamples(
       props.model.billing_expr,
-      props.model.billing_usage_schema,
+      usageSchema,
       props.model.billing_usage_examples
     )
     const priceFields = getDynamicPriceFields(dynamicTiers, {
@@ -1169,7 +1165,7 @@ function ProviderGroupPricingSection(
       priceRate: props.priceRate,
       usdExchangeRate: props.usdExchangeRate,
       groupRatioMultiplier: 1,
-      usageSchema: props.model.billing_usage_schema,
+      usageSchema,
     })
     const formattedPricesByGroup = new Map(
       availableGroups.map((group) => {
@@ -1182,7 +1178,7 @@ function ProviderGroupPricingSection(
             priceRate: props.priceRate,
             usdExchangeRate: props.usdExchangeRate,
             groupRatioMultiplier: ratio,
-            usageSchema: props.model.billing_usage_schema,
+            usageSchema,
           }),
         ] as const
       })
@@ -1223,7 +1219,7 @@ function ProviderGroupPricingSection(
                       : [
                           {
                             id: 'tier',
-                            header: props.model.billing_usage_schema
+                            header: usageSchema
                               ? t('Applicable conditions')
                               : t('Tier'),
                             className: thClass,
@@ -1234,7 +1230,7 @@ function ProviderGroupPricingSection(
                                 return (
                                   taskPricingConditions(
                                     (tier as ParsedTaskTier).conditions,
-                                    props.model.billing_usage_schema,
+                                    usageSchema,
                                     i18n.language,
                                     t
                                   ) ||
@@ -1483,14 +1479,11 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
     Boolean(props.model.billing_expr)
 
   const simpleTaskPricing = hasSimpleTaskPricing(props.model)
-  const taskTiers = getTaskPricingDisplayTiers(
-    props.model.billing_expr,
-    props.model.billing_usage_schema
-  )
+  const usageSchema = getTaskPricingDisplaySchema(props.model)
   const showBasePrices =
-    !props.model.billing_usage_schema ||
+    !usageSchema ||
     simpleTaskPricing ||
-    taskTiers.length === 0
+    getDynamicPricingTiers(props.model).length === 0
 
   return (
     <div className='@container/details space-y-4'>
@@ -1530,7 +1523,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
             {isDynamic && !simpleTaskPricing && (
               <DynamicPricingBreakdown
                 billingExpr={props.model.billing_expr}
-                usageSchema={props.model.billing_usage_schema}
+                usageSchema={usageSchema}
                 hideRawExpression
                 taskPriceOptions={{
                   showRechargePrice,

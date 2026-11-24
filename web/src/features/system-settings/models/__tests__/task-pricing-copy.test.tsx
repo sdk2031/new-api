@@ -219,6 +219,16 @@ it('sets a price per second or per started custom interval', async () => {
   expect(onChange).toHaveBeenLastCalledWith(
     'tier("duration", u("seconds") * 0.4)'
   )
+  expect(screen.getByRole('radio', { name: 'Per second' })).toBeChecked()
+  expect(screen.getByRole('textbox', { name: 'Price per second' })).toHaveValue(
+    '0.4'
+  )
+  expect(
+    screen.queryByRole('textbox', { name: 'Billing interval' })
+  ).not.toBeInTheDocument()
+  await user.click(
+    screen.getByRole('radio', { name: 'Fixed price per duration block' })
+  )
   await user.clear(screen.getByRole('textbox', { name: 'Billing interval' }))
   await user.type(
     screen.getByRole('textbox', { name: 'Billing interval' }),
@@ -227,12 +237,27 @@ it('sets a price per second or per started custom interval', async () => {
   fireEvent.change(
     screen.getByRole('textbox', { name: 'Price per billing interval' }),
     {
-      target: { value: '1.20' },
+      target: { value: '1.50' },
     }
   )
   expect(onChange).toHaveBeenLastCalledWith(
-    'tier("duration", ceil(u("seconds") / 30) * 1.2)'
+    'tier("duration", ceil(u("seconds") / 30) * 1.5)'
   )
+  const duration = screen.getByRole('spinbutton', {
+    name: 'Preview duration (seconds)',
+  })
+  for (const seconds of [5, 20, 30]) {
+    fireEvent.change(duration, { target: { value: String(seconds) } })
+    expect(screen.getByText('Preview base cost: $1.5')).toBeVisible()
+  }
+  fireEvent.change(duration, { target: { value: '31' } })
+  expect(screen.getByText('Preview base cost: $3')).toBeVisible()
+  await user.click(screen.getByRole('radio', { name: 'Per second' }))
+  expect(onChange).toHaveBeenLastCalledWith(
+    'tier("duration", u("seconds") * 0.05)'
+  )
+  expect(duration).toHaveValue(31)
+  expect(screen.getByText('Preview base cost: $1.55')).toBeVisible()
 })
 
 it.each([12, 30])(
@@ -252,10 +277,15 @@ it.each([12, 30])(
     })
     expect(price).toHaveValue('1.2')
 
-    for (const value of ['', '0', '-2', '2.5']) {
+    expect(
+      screen.getByRole('radio', { name: 'Fixed price per duration block' })
+    ).toBeChecked()
+    for (const value of ['', '0', '1', '-2', '2.5']) {
       fireEvent.change(input, { target: { value } })
       expect(input).toHaveAttribute('data-billing-invalid', 'true')
-      expect(input).toHaveAccessibleDescription('Enter a positive integer')
+      expect(input).toHaveAccessibleDescription(
+        'Enter a whole number of at least 2'
+      )
       expect(price).toBeDisabled()
     }
     expect(onChange).not.toHaveBeenCalled()

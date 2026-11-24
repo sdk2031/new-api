@@ -27,6 +27,7 @@ import { Combobox } from '@/components/ui/combobox'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Select,
   SelectContent,
@@ -300,8 +301,12 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
   const [intervalDraft, setIntervalDraft] = useState(() =>
     String(durationPrice.interval)
   )
-  const validInterval = parseBillingInterval(intervalDraft)
+  const blockPricing = durationPrice.interval > 1
+  const parsedInterval = parseBillingInterval(intervalDraft)
+  const validInterval =
+    parsedInterval !== null && parsedInterval > 1 ? parsedInterval : null
   const intervalDescriptionId = useId()
+  const durationModeId = useId()
   const [editorMode, setEditorMode] = useState<EditorMode>(() => {
     if (
       parseDurationPrice(props.billingExpr, durationField) &&
@@ -430,6 +435,20 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     )
   }
 
+  const setDurationBillingMode = (mode: unknown) => {
+    if (mode !== 'block' && mode !== 'second') return
+    if ((mode === 'block') === blockPricing) return
+    const interval = mode === 'block' ? (validInterval ?? 30) : 1
+    // Keep the price for a full interval equivalent when switching units.
+    const price = (durationPrice.price / durationPrice.interval) * interval
+    if (!Number.isFinite(price)) return
+    if (mode === 'block') setIntervalDraft(String(interval))
+    publishDurationPrice({
+      interval,
+      price: Number(formatPricingNumber(price)),
+    })
+  }
+
   const handleModeChange = (nextMode: EditorMode) => {
     if (nextMode === editorMode) return
     if (nextMode === 'duration') {
@@ -489,6 +508,15 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
       props.requestRuleExpr
     )
   }
+
+  const durationPriceLabel = blockPricing
+    ? t('Price per billing interval')
+    : t('Price per second')
+  const previewSeconds = Number(previewSample[durationField ?? ''] ?? 0)
+  const previewBaseCost =
+    (blockPricing
+      ? Math.ceil(previewSeconds / durationPrice.interval)
+      : previewSeconds) * durationPrice.price
 
   return (
     <div className='space-y-5'>
@@ -574,51 +602,82 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
       <div className='bg-muted/30 space-y-3 rounded-md border p-3'>
         {editorMode === 'duration' && durationField && (
           <div className='grid gap-3 sm:grid-cols-2'>
-            <Field>
-              <FieldLabel>{t('Billing interval')}</FieldLabel>
-              <div className='flex items-center gap-2'>
-                <Input
-                  aria-label={t('Billing interval')}
-                  aria-describedby={intervalDescriptionId}
-                  aria-invalid={validInterval === null || undefined}
-                  data-billing-invalid={validInterval === null || undefined}
-                  inputMode='numeric'
-                  value={intervalDraft}
-                  onChange={(event) => {
-                    const value = event.target.value
-                    setIntervalDraft(value)
-                    const interval = parseBillingInterval(value)
-                    if (interval !== null) {
-                      publishDurationPrice({ ...durationPrice, interval })
-                    }
-                  }}
-                />
-                <span className='text-muted-foreground shrink-0 text-xs'>
-                  {t('seconds')}
-                </span>
-              </div>
-              {validInterval === null ? (
-                <FieldDescription
-                  id={intervalDescriptionId}
-                  role='alert'
-                  className='text-destructive'
-                >
-                  {t('Enter a positive integer')}
-                </FieldDescription>
-              ) : (
-                <FieldDescription id={intervalDescriptionId}>
-                  {t(
-                    'Enter 1 to charge per second. Longer intervals round up to the next whole interval.'
-                  )}
-                </FieldDescription>
-              )}
+            <Field className='sm:col-span-2'>
+              <FieldLabel id={durationModeId}>{t('Pricing mode')}</FieldLabel>
+              <RadioGroup
+                aria-labelledby={durationModeId}
+                value={blockPricing ? 'block' : 'second'}
+                onValueChange={setDurationBillingMode}
+                className='sm:grid-cols-2'
+              >
+                <div className='flex items-center gap-2'>
+                  <RadioGroupItem
+                    value='second'
+                    id={`${durationModeId}-second`}
+                  />
+                  <Label htmlFor={`${durationModeId}-second`}>
+                    {t('Per second')}
+                  </Label>
+                </div>
+                <div className='flex items-center gap-2'>
+                  <RadioGroupItem
+                    value='block'
+                    id={`${durationModeId}-block`}
+                  />
+                  <Label htmlFor={`${durationModeId}-block`}>
+                    {t('Fixed price per duration block')}
+                  </Label>
+                </div>
+              </RadioGroup>
             </Field>
-            <Field>
-              <FieldLabel>{t('Price per billing interval')}</FieldLabel>
+            {blockPricing && (
+              <Field>
+                <FieldLabel>{t('Billing interval')}</FieldLabel>
+                <div className='flex items-center gap-2'>
+                  <Input
+                    aria-label={t('Billing interval')}
+                    aria-describedby={intervalDescriptionId}
+                    aria-invalid={validInterval === null || undefined}
+                    data-billing-invalid={validInterval === null || undefined}
+                    inputMode='numeric'
+                    value={intervalDraft}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      setIntervalDraft(value)
+                      const interval = parseBillingInterval(value)
+                      if (interval !== null && interval > 1) {
+                        publishDurationPrice({ ...durationPrice, interval })
+                      }
+                    }}
+                  />
+                  <span className='text-muted-foreground shrink-0 text-xs'>
+                    {t('seconds')}
+                  </span>
+                </div>
+                {validInterval === null ? (
+                  <FieldDescription
+                    id={intervalDescriptionId}
+                    role='alert'
+                    className='text-destructive'
+                  >
+                    {t('Enter a whole number of at least 2')}
+                  </FieldDescription>
+                ) : (
+                  <FieldDescription id={intervalDescriptionId}>
+                    {t(
+                      'Each started block is billed in full. The video keeps the requested duration.'
+                    )}
+                  </FieldDescription>
+                )}
+              </Field>
+            )}
+            <Field className={blockPricing ? undefined : 'sm:col-span-2'}>
+              <FieldLabel>{durationPriceLabel}</FieldLabel>
               <PricingAmountInput
+                key={blockPricing ? 'block' : 'second'}
                 currency={props.currency}
-                aria-label={t('Price per billing interval')}
-                disabled={validInterval === null}
+                aria-label={durationPriceLabel}
+                disabled={blockPricing && validInterval === null}
                 value={durationPrice.price}
                 onChange={(value) =>
                   publishDurationPrice({
@@ -629,11 +688,9 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
               />
             </Field>
             <Field className='sm:col-span-2'>
-              <FieldLabel>
-                {t('Usage · {{price}}', { price: durationField })}
-              </FieldLabel>
+              <FieldLabel>{t('Preview duration (seconds)')}</FieldLabel>
               <Input
-                aria-label={t('Usage · {{price}}', { price: durationField })}
+                aria-label={t('Preview duration (seconds)')}
                 type='number'
                 min={0}
                 value={previewSample[durationField] ?? 0}
@@ -644,6 +701,16 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                   )
                 }
               />
+              {(!blockPricing || validInterval !== null) && (
+                <FieldDescription>
+                  {t('Preview base cost: {{amount}}', {
+                    amount: formatPricingAmount(
+                      previewBaseCost,
+                      props.currency
+                    ),
+                  })}
+                </FieldDescription>
+              )}
             </Field>
           </div>
         )}

@@ -100,41 +100,50 @@ const model: PricingModel = {
 }
 const clients: QueryClient[] = []
 
-it('shows the base and group price for a 30-second interval without exposing the formula', () => {
-  vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  clients.push(client)
-  const billingExpr = 'tier("duration", ceil(u("seconds") / 30) * 3)'
-  render(
-    <QueryClientProvider client={client}>
-      <ModelDetailsContent
-        model={{
-          ...model,
-          model_name: 'seedance-2.5-480-720p',
-          billing_expr: billingExpr,
-          billing_usage_schema: {
-            seconds: { type: 'number', unit: 'second' },
-          },
-        }}
-        groupRatio={{ default: 2 }}
-        usableGroup={{ default: { desc: '', ratio: 2 } }}
-        endpointMap={{}}
-        autoGroups={[]}
-        priceRate={1}
-        usdExchangeRate={1}
-        tokenUnit='M'
-      />
-    </QueryClientProvider>
-  )
-  expect(screen.getByText('$3').parentElement).toHaveTextContent(/\$3\s*\/\s*30 s/)
-  const groupTable = within(screen.getByRole('table'))
-  expect(groupTable.getByRole('columnheader', { name: /30 s/ })).toBeVisible()
-  expect(groupTable.getByText('$6')).toBeVisible()
-  expect(screen.queryByText(billingExpr)).not.toBeInTheDocument()
-  expect(screen.queryByText('Special billing expression')).not.toBeInTheDocument()
-})
+it.each<BillingUsageSchema | undefined>([
+  { seconds: { type: 'number', unit: 'second' } },
+  {},
+  undefined,
+])(
+  'shows the base and group prices for a 30-second interval with schema %j',
+  (usageSchema) => {
+    vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    clients.push(client)
+    const billingExpr = 'tier("duration", ceil(u("seconds") / 30) * 3)'
+    render(
+      <QueryClientProvider client={client}>
+        <ModelDetailsContent
+          model={{
+            ...model,
+            model_name: 'seedance-2.5-480-720p',
+            billing_expr: billingExpr,
+            billing_usage_schema: usageSchema,
+          }}
+          groupRatio={{ default: 2 }}
+          usableGroup={{ default: { desc: '', ratio: 2 } }}
+          endpointMap={{}}
+          autoGroups={[]}
+          priceRate={1}
+          usdExchangeRate={1}
+          tokenUnit='M'
+        />
+      </QueryClientProvider>
+    )
+    expect(screen.getByText('$3').parentElement).toHaveTextContent(
+      /\$3\s*\/\s*30 s/
+    )
+    const groupTable = within(screen.getByRole('table'))
+    expect(groupTable.getByRole('columnheader', { name: /30 s/ })).toBeVisible()
+    expect(groupTable.getByText('$6')).toBeVisible()
+    expect(screen.queryByText(billingExpr)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Special billing expression')
+    ).not.toBeInTheDocument()
+  }
+)
 
 it('falls back for omitted count labels and preserves canonical units for other quantities', () => {
   expect(taskUsageUnitLabel({ unit: 'count' }, 'zhCN', '次')).toBe('次')

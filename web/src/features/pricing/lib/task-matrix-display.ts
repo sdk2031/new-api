@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { BillingUsageSchema } from '../types'
+import type { BillingUsageSchema, PricingModel } from '../types'
 import {
   parseTaskTiersFromExpr,
+  splitBillingExprAndRequestRules,
   type ParsedTaskTier,
   type TaskTierCondition,
 } from './billing-expr'
@@ -54,6 +55,24 @@ export function parseDurationPrice(
   if (interval === null || !Number.isFinite(price) || price < 0) return null
   if (match[1] && interval === 1) return null
   return { interval, price }
+}
+
+const durationDisplaySchema: BillingUsageSchema = {
+  seconds: { type: 'number', unit: 'second' },
+}
+
+// Older catalog snapshots may omit plugin metadata. Infer the display unit
+// only for the exact seconds formula emitted by the duration pricing editor.
+export function getTaskPricingDisplaySchema(
+  model: PricingModel
+): BillingUsageSchema | undefined {
+  const schema = model.billing_usage_schema
+  if (schema && Object.keys(schema).length > 0) return schema
+  if (model.billing_mode !== 'tiered_expr' || !model.billing_expr) return schema
+  const { billingExpr } = splitBillingExprAndRequestRules(model.billing_expr)
+  return parseDurationPrice(billingExpr, 'seconds')
+    ? durationDisplaySchema
+    : schema
 }
 
 /**

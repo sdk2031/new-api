@@ -30,7 +30,10 @@ import {
   splitBillingExprAndRequestRules,
   type TaskTierCondition,
 } from './billing-expr'
-import { getTaskPricingDisplayTiers } from './task-matrix-display'
+import {
+  getTaskPricingDisplaySchema,
+  getTaskPricingDisplayTiers,
+} from './task-matrix-display'
 
 export function taskPriceLabel(
   description: LocalizedTextValue | undefined,
@@ -90,18 +93,12 @@ export function taskPricingConditions(
 }
 
 export function hasSimpleTaskPricing(model: PricingModel): boolean {
-  if (
-    !model.billing_usage_schema ||
-    model.billing_mode !== 'tiered_expr' ||
-    !model.billing_expr
-  ) {
+  const schema = getTaskPricingDisplaySchema(model)
+  if (!schema || model.billing_mode !== 'tiered_expr' || !model.billing_expr) {
     return false
   }
   const split = splitBillingExprAndRequestRules(model.billing_expr)
   if (split.requestRuleExpr?.trim()) return false
-  const tiers = getTaskPricingDisplayTiers(
-    split.billingExpr,
-    model.billing_usage_schema
-  )
+  const tiers = getTaskPricingDisplayTiers(split.billingExpr, schema)
   return tiers.length === 1
 }

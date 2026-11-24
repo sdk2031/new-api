@@ -43,7 +43,10 @@ import {
   getTaskNumberFields,
   tryParseTaskVisualConfig,
 } from './task-expr'
-import { getTaskPricingDisplayTiers } from './task-matrix-display'
+import {
+  getTaskPricingDisplaySchema,
+  getTaskPricingDisplayTiers,
+} from './task-matrix-display'
 
 export type DynamicPriceOptions = {
   tokenUnit: TokenUnit
@@ -152,7 +155,7 @@ export function isDynamicPricingModel(model: PricingModel): boolean {
 }
 
 export function hasTaskUsageSchema(model: PricingModel): boolean {
-  return Object.keys(model.billing_usage_schema ?? {}).length > 0
+  return Object.keys(getTaskPricingDisplaySchema(model) ?? {}).length > 0
 }
 
 export function isTaskUsagePricingModel(model: PricingModel): boolean {
@@ -177,7 +180,9 @@ export function isUnconfiguredTaskUsageModel(model: PricingModel): boolean {
 export function getTaskPricingUnit(
   model: PricingModel
 ): BillingUsageUnit | null {
-  const primaryField = getTaskNumberFields(model.billing_usage_schema)[0]
+  const primaryField = getTaskNumberFields(
+    getTaskPricingDisplaySchema(model)
+  )[0]
   return primaryField?.[1].unit ?? null
 }
 
@@ -259,7 +264,10 @@ export function getDynamicPricingTiers(
     model.billing_expr || ''
   )
   if (isTaskUsagePricingModel(model)) {
-    return getTaskPricingDisplayTiers(billingExpr, model.billing_usage_schema)
+    return getTaskPricingDisplayTiers(
+      billingExpr,
+      getTaskPricingDisplaySchema(model)
+    )
   }
   return parseTiersFromExpr(billingExpr)
 }
@@ -309,13 +317,14 @@ export function getDynamicPriceEntries(
     ).flatMap(([field, definition]) => {
       const value = Number(tier.unitPrices[field])
       if (!Number.isFinite(value) || value < 0 || !definition.unit) return []
+      const showIntervalLabel = tier.billingInterval && !definition.description
       return [
         {
           key: field,
           field,
           label: field,
-          shortLabel: field,
-          labelKind: 'schema',
+          shortLabel: showIntervalLabel ? 'Price per billing interval' : field,
+          labelKind: showIntervalLabel ? 'i18n' : 'schema',
           value,
           formatted: formatTaskUsageUnitPrice(value, options),
           unit: definition.unit,
@@ -501,6 +510,7 @@ export function getDynamicPricingSummary(
 
   const tiers = getDynamicPricingTiers(model)
   const isTaskUsage = isTaskUsagePricingModel(model)
+  const usageSchema = getTaskPricingDisplaySchema(model)
   const baseExpression = splitBillingExprAndRequestRules(
     model.billing_expr || ''
   ).billingExpr
@@ -513,7 +523,7 @@ export function getDynamicPricingSummary(
     : (summaryTiers[0] ?? null)
   let entries = getDynamicPriceEntries(tier, {
     ...options,
-    usageSchema: model.billing_usage_schema,
+    usageSchema,
   })
   let isMixedBilling = false
   if (!isTaskUsage) {
@@ -533,7 +543,7 @@ export function getDynamicPricingSummary(
   }
   if (isTaskUsage) {
     const priceRanges = new Map<string, { min: number; max: number }>()
-    for (const [field] of getTaskNumberFields(model.billing_usage_schema)) {
+    for (const [field] of getTaskNumberFields(usageSchema)) {
       let min = Number.POSITIVE_INFINITY
       let max = Number.NEGATIVE_INFINITY
       for (const taskTier of tiers) {
