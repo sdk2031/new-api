@@ -983,6 +983,28 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	} else {
 		delete(rendered, "completed_at")
 	}
+	if a.plugin.Meta.Key == "foke-video" && task.Status == model.TaskStatusSuccess {
+		// Foke clients may download directly from a URL in the status response.
+		// Publish a gateway artifact link, not the stored provider URL.
+		artifacts, err := a.ListArtifacts(task)
+		if err != nil {
+			logger.LogWarn(context.Background(), "Foke video artifact projection failed for task %s", task.TaskID)
+		}
+		for _, artifact := range artifacts {
+			if artifact.Type != "video" {
+				continue
+			}
+			contentURL, err := service.BuildTaskArtifactContentURL(task.TaskID, artifact.Key)
+			if err != nil {
+				logger.LogWarn(context.Background(), "Foke video artifact URL unavailable for task %s", task.TaskID)
+				break
+			}
+			rendered["video_url"] = contentURL
+			rendered["url"] = contentURL
+			rendered["content_url"] = contentURL
+			break
+		}
+	}
 	return common.Marshal(rendered)
 }
 

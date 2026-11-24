@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -16,10 +17,12 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
+	taskjsplugin "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -327,6 +330,47 @@ func TestFokeVideoTask(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, map[string]any{"url": signedVideo, "method": "GET", "credentialless": true}, content)
 	}
+
+	t.Run("completed queries expose only a gateway download", func(t *testing.T) {
+		previousAddress, previousServer, previousSecret := system_setting.TaskPublicAddress, system_setting.ServerAddress, common.CryptoSecret
+		t.Cleanup(func() {
+			system_setting.TaskPublicAddress, system_setting.ServerAddress, common.CryptoSecret = previousAddress, previousServer, previousSecret
+		})
+		system_setting.TaskPublicAddress = "https://gateway.example"
+		system_setting.ServerAddress = "https://fallback.example"
+		common.CryptoSecret = "test-foke-artifact-secret"
+
+		task := &model.Task{
+			TaskID: "task_public_foke", Platform: "foke-video", Status: model.TaskStatusSuccess,
+			Progress: "100%", Properties: model.Properties{OriginModelName: publicModel},
+		}
+		task.SetData(map[string]any{"status": "success", "videoUrl": signedVideo, "jobId": "private-job-123"})
+		adaptor := taskjsplugin.New(plugin)
+		data, err := adaptor.ConvertToOpenAIVideo(task)
+		require.NoError(t, err)
+		var result map[string]any
+		require.NoError(t, common.Unmarshal(data, &result))
+		assert.Equal(t, task.TaskID, result["id"])
+		assert.Equal(t, "completed", result["status"])
+		assert.Equal(t, publicModel, result["model"])
+		assert.NotContains(t, string(data), "media.example")
+		assert.NotContains(t, string(data), "private-job-123")
+		link, ok := result["video_url"].(string)
+		require.True(t, ok)
+		assert.Equal(t, link, result["url"])
+		assert.Equal(t, link, result["content_url"])
+		download, err := url.Parse(link)
+		require.NoError(t, err)
+		assert.Equal(t, "gateway.example", download.Host)
+		assert.Equal(t, "/v1/tasks/task_public_foke/artifacts/video/content", download.Path)
+		assert.True(t, service.VerifyTaskArtifactAccess(download.Query().Get(service.TaskArtifactAccessQueryParameter), task.TaskID, "video"))
+
+		task.Status = model.TaskStatusInProgress
+		data, err = adaptor.ConvertToOpenAIVideo(task)
+		require.NoError(t, err)
+		assert.NotContains(t, string(data), "content_url")
+		assert.NotContains(t, string(data), "video_url")
+	})
 }
 
 func TestRelayTaskSubmitEmptyOriginKeepsLateMapping(t *testing.T) {
