@@ -157,7 +157,10 @@ function TaskPricingDraft(props: {
         ...(props.videoResolutions
           ? {
               aspect_ratio: { enum: ['16:9', '9:16'] },
-              resolution: { enum: ['480p', '720p'], description: 'Resolution' },
+              resolution: {
+                enum: ['480p', '720p', '1080p'],
+                description: 'Resolution',
+              },
             }
           : { mode: { enum: ['std', 'pro'] } }),
       }}
@@ -174,7 +177,7 @@ it('edits video prices by resolution without presenting aspect ratio as a price 
   const user = userEvent.setup()
   const onChange = vi.fn()
   const expression =
-    'u("resolution") == "480p" ? tier("duration", ceil(u("seconds") / 30) * 1.5) : tier("duration", ceil(u("seconds") / 30) * 3)'
+    'u("resolution") == "480p" ? tier("duration", ceil(u("seconds") / 30) * 1.5) : u("resolution") == "720p" ? tier("duration", ceil(u("seconds") / 30) * 3) : tier("duration", ceil(u("seconds") / 30) * 6)'
   const draft = render(
     <TaskPricingDraft expression='' onChange={onChange} videoResolutions />
   )
@@ -192,23 +195,51 @@ it('edits video prices by resolution without presenting aspect ratio as a price 
       videoResolutions
     />
   )
-  const price = screen.getByRole('textbox', {
-    name: 'Price per billing interval',
+  const durationTable = screen.getByRole('table')
+  expect(
+    within(durationTable)
+      .getAllByRole('columnheader')
+      .map((cell) => cell.textContent)
+  ).toEqual(['Resolution', 'Billing unit', 'Unit price'])
+  const row = within(durationTable).getByRole('row', { name: /^720p / })
+  expect(within(row).getByText('Every 30 seconds')).toBeVisible()
+  const price = within(row).getByRole('textbox', {
+    name: 'Unit price: 720p',
   })
-  expect(price).toHaveValue('1.5')
+  expect(price).toHaveValue('3')
+  expect(screen.getByRole('textbox', { name: 'Unit price: 480p' })).toHaveValue(
+    '1.5'
+  )
+  expect(
+    screen.getByRole('textbox', { name: 'Unit price: 1080p' })
+  ).toHaveValue('6')
   await user.click(screen.getByRole('combobox', { name: 'Resolution' }))
   await user.click(screen.getByRole('option', { name: '720p' }))
   expect(screen.getByText('Preview base cost: $3')).toBeVisible()
-  fireEvent.change(
-    screen.getByRole('textbox', { name: 'Price per billing interval' }),
-    {
-      target: { value: '4' },
-    }
-  )
+  fireEvent.change(price, { target: { value: '4' } })
   expect(onChange).toHaveBeenLastCalledWith(
-    'u("resolution") == "480p" ? tier("duration", ceil(u("seconds") / 30) * 1.5) : tier("duration", ceil(u("seconds") / 30) * 4)'
+    'u("resolution") == "480p" ? tier("duration", ceil(u("seconds") / 30) * 1.5) : u("resolution") == "720p" ? tier("duration", ceil(u("seconds") / 30) * 4) : tier("duration", ceil(u("seconds") / 30) * 6)'
   )
   expect(screen.getByText('Preview base cost: $4')).toBeVisible()
+})
+
+it('preserves the shared per-second rate on untouched resolutions', () => {
+  const onChange = vi.fn()
+  render(
+    <TaskPricingDraft
+      expression='tier("duration", u("seconds") * 0.4)'
+      onChange={onChange}
+      videoResolutions
+    />
+  )
+  const table = screen.getByRole('table')
+  expect(within(table).getAllByText('Per second')).toHaveLength(3)
+  const price = within(table).getByRole('textbox', { name: 'Unit price: 720p' })
+  expect(price).toHaveValue('0.4')
+  fireEvent.change(price, { target: { value: '0.8' } })
+  expect(onChange).toHaveBeenLastCalledWith(
+    'u("resolution") == "480p" ? tier("duration", u("seconds") * 0.4) : u("resolution") == "720p" ? tier("duration", u("seconds") * 0.8) : tier("duration", u("seconds") * 0.4)'
+  )
 })
 
 it('lets users cancel or discard an unsupported expression and its request rules', async () => {
