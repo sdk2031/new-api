@@ -55,7 +55,6 @@ import {
   formatUptimePct,
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
-import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
@@ -744,14 +743,6 @@ function PriceSection(props: {
             <p className='text-muted-foreground mt-1 text-xs'>
               {t('Unable to parse structured pricing')}
             </p>
-            <div className='mt-3'>
-              <div className='text-muted-foreground mb-1 text-[10px] font-medium tracking-wider uppercase'>
-                {t('Raw expression')}
-              </div>
-              <code className='text-muted-foreground bg-background/80 block max-h-28 overflow-auto rounded-md border px-2 py-1.5 font-mono text-xs break-all'>
-                {dynamicSummary.rawExpression}
-              </code>
-            </div>
           </div>
         </section>
       )
@@ -1014,40 +1005,51 @@ type GroupPricingSectionProps = {
 
 function GroupPricingSection(props: GroupPricingSectionProps) {
   const { t } = useTranslation()
-  const variants = props.model.billing_plugin_variants
-  if (!variants?.length) {
+  const variants = [
+    ...new Map(
+      (props.model.billing_plugin_variants ?? []).map((variant) => [
+        JSON.stringify([
+          variant.billing_mode,
+          variant.billing_expr,
+          variant.billing_usage_schema,
+          variant.billing_usage_examples,
+        ]),
+        variant,
+      ])
+    ),
+  ]
+  if (!variants.length) {
     return <ProviderGroupPricingSection {...props} />
+  }
+  if (variants.length === 1) {
+    const [, variant] = variants[0]
+    const model = withPluginPricing(props.model, variant)
+    return variant.billing_expr || variant.billing_mode === 'ratio' ? (
+      <ProviderGroupPricingSection {...props} model={model} />
+    ) : (
+      <UnconfiguredTaskPricingNotice model={model} />
+    )
   }
   return (
     <section>
       <SectionTitle>{t('Pricing by Group')}</SectionTitle>
-      <Tabs key={props.model.model_name} defaultValue={variants[0].plugin_key}>
+      <Tabs key={props.model.model_name} defaultValue='1'>
         <TabsList
-          aria-label={t('Provider')}
+          aria-label={t('Pricing by Group')}
           className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'
         >
-          {variants.map((variant) => (
+          {variants.map(([key], index) => (
             <TabsTrigger
-              key={variant.plugin_key}
-              value={variant.plugin_key}
+              key={key}
+              value={String(index + 1)}
               className='max-w-full min-w-0'
             >
-              <PluginIcon
-                plugin={{
-                  key: variant.plugin_key,
-                  name: variant.plugin_name,
-                  icon: variant.icon,
-                }}
-                size={16}
-              />
-              <span className='truncate' title={variant.plugin_name}>
-                {variant.plugin_name}
-              </span>
+              {t('Pricing tier {{name}}', { name: index + 1 })}
             </TabsTrigger>
           ))}
         </TabsList>
-        {variants.map((variant) => (
-          <TabsContent key={variant.plugin_key} value={variant.plugin_key}>
+        {variants.map(([key, variant], index) => (
+          <TabsContent key={key} value={String(index + 1)}>
             {variant.billing_expr || variant.billing_mode === 'ratio' ? (
               <ProviderGroupPricingSection
                 {...props}
@@ -1151,14 +1153,6 @@ function ProviderGroupPricingSection(
                 'Group prices cannot be expanded because this expression is not a standard tiered pricing expression.'
               )}
             </p>
-            <div className='mt-3'>
-              <div className='text-muted-foreground mb-1 text-[10px] font-medium tracking-wider uppercase'>
-                {t('Raw expression')}
-              </div>
-              <code className='text-muted-foreground bg-background/80 block max-h-28 overflow-auto rounded-md border px-2 py-1.5 font-mono text-xs break-all'>
-                {props.model.billing_expr}
-              </code>
-            </div>
           </div>
         </section>
       )
@@ -1537,6 +1531,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
               <DynamicPricingBreakdown
                 billingExpr={props.model.billing_expr}
                 usageSchema={props.model.billing_usage_schema}
+                hideRawExpression
                 taskPriceOptions={{
                   showRechargePrice,
                   priceRate: props.priceRate,

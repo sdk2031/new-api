@@ -80,6 +80,7 @@ type DynamicPricingBreakdownProps = {
    * call they are inspecting. Defaults to false (show all configured prices).
    */
   hideCacheColumns?: boolean
+  hideRawExpression?: boolean
   /**
    * Dense rendering for the usage-log details dialog: drops the colored
    * icon header and uses the dialog's small text sizes. Defaults to false.
@@ -106,6 +107,7 @@ type BreakdownPriceField = {
   labelKind: DynamicPriceLabelKind
   unit: BillingUsageUnit | 'request' | 'token' | 'image'
   unitLabel?: string | Record<string, string>
+  billingInterval?: number
   showTokenUnit?: boolean
   value: (tier: BreakdownTier) => number
 }
@@ -208,7 +210,9 @@ function formatBreakdownPrice(
     field.unit === 'image'
       ? formatTaskUsageUnitPrice(value, { tokenUnit: 'M', ...taskPriceOptions })
       : `${symbol}${(value * rate).toFixed(4)}`
-  if (field.unit === 'second') return `${amount}/${t('s')}`
+  if (field.unit === 'second') {
+    return `${amount}/${taskUsageUnitLabel(field, language, t('s'))}`
+  }
   if (field.unit === 'count') {
     return `${amount}/${taskUsageUnitLabel(field, language, t('unit'))}`
   }
@@ -285,6 +289,7 @@ export function DynamicPricingBreakdown({
   matchedFixedPrice,
   requestRules,
   hideCacheColumns = false,
+  hideRawExpression = false,
   compact = false,
   usageSchema,
   taskPriceOptions,
@@ -357,12 +362,16 @@ export function DynamicPricingBreakdown({
             </div>
           </div>
         )}
-        <div className='text-muted-foreground mb-1 text-[10px] font-medium tracking-wider uppercase'>
-          {t('Raw expression')}
-        </div>
-        <code className='text-muted-foreground block text-xs break-all'>
-          {expr}
-        </code>
+        {!hideRawExpression && (
+          <>
+            <div className='text-muted-foreground mb-1 text-[10px] font-medium tracking-wider uppercase'>
+              {t('Raw expression')}
+            </div>
+            <code className='text-muted-foreground block text-xs break-all'>
+              {expr}
+            </code>
+          </>
+        )}
       </section>
     )
   }
@@ -378,7 +387,9 @@ export function DynamicPricingBreakdown({
             tiers.some(
               (tier) =>
                 isTaskBreakdownTier(tier) &&
-                Number(tier.unitPrices[field] || 0) > 0
+                (tier.billingInterval
+                  ? Object.hasOwn(tier.unitPrices, field)
+                  : Number(tier.unitPrices[field] || 0) > 0)
             )
         )
         .sort(([left], [right]) => left.localeCompare(right))
@@ -388,6 +399,10 @@ export function DynamicPricingBreakdown({
           labelKind: 'schema' as const,
           unit: definition.unit as BillingUsageUnit,
           unitLabel: definition.unitLabel,
+          billingInterval:
+            tiers.length === 1 && isTaskBreakdownTier(tiers[0])
+              ? tiers[0].billingInterval
+              : undefined,
           value: (tier: BreakdownTier) =>
             isTaskBreakdownTier(tier) ? Number(tier.unitPrices[field] || 0) : 0,
         }))

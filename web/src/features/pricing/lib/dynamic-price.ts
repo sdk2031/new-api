@@ -28,7 +28,6 @@ import type {
 import {
   BILLING_PRICING_VARS,
   getCurrentTimePricingTiers,
-  parseTaskTiersFromExpr,
   parseTiersFromExpr,
   splitBillingExprAndRequestRules,
   tryParseRequestRuleExpr,
@@ -44,6 +43,7 @@ import {
   getTaskNumberFields,
   tryParseTaskVisualConfig,
 } from './task-expr'
+import { getTaskPricingDisplayTiers } from './task-matrix-display'
 
 export type DynamicPriceOptions = {
   tokenUnit: TokenUnit
@@ -73,6 +73,7 @@ export type DynamicPriceEntry = {
   unit: 'token' | BillingUsageUnit | 'request' | 'image'
   unitLabel?: string | Record<string, string>
   variable?: BillingVar
+  billingInterval?: number
   description?: string | Record<string, string>
 }
 
@@ -258,7 +259,7 @@ export function getDynamicPricingTiers(
     model.billing_expr || ''
   )
   if (isTaskUsagePricingModel(model)) {
-    return parseTaskTiersFromExpr(billingExpr, model.billing_usage_schema, true)
+    return getTaskPricingDisplayTiers(billingExpr, model.billing_usage_schema)
   }
   return parseTiersFromExpr(billingExpr)
 }
@@ -320,6 +321,7 @@ export function getDynamicPriceEntries(
           unit: definition.unit,
           unitLabel: definition.unitLabel,
           description: definition.description,
+          billingInterval: tier.billingInterval,
         } satisfies DynamicPriceEntry,
       ]
     })
@@ -422,7 +424,7 @@ export function getDynamicPricingSummary(
     ]) {
       for (const entry of providerEntries) {
         // Identical field names with different units describe different prices.
-        const key = `${entry.field}:${entry.unit}`
+        const key = `${entry.field}:${entry.unit}:${entry.billingInterval ?? 1}`
         const range = ranges.get(key)
         const merged = range?.entry ?? { ...entry, key }
         if (
@@ -454,7 +456,10 @@ export function getDynamicPricingSummary(
       summaries.flatMap((summary) =>
         summary.primaryEntries
           .slice(0, 1)
-          .map((entry) => `${entry.field}:${entry.unit}`)
+          .map(
+            (entry) =>
+              `${entry.field}:${entry.unit}:${entry.billingInterval ?? 1}`
+          )
       )
     )
     const primary = entries.filter(

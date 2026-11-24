@@ -18,9 +18,7 @@ import (
 )
 
 type PricingPluginVariant struct {
-	PluginKey            string                               `json:"plugin_key"`
-	PluginName           string                               `json:"plugin_name"`
-	Icon                 string                               `json:"icon,omitempty"`
+	PluginKey            string                               `json:"-"`
 	BillingExpr          string                               `json:"billing_expr"`
 	BillingMode          string                               `json:"billing_mode"`
 	BillingUsageSchema   map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema"`
@@ -377,21 +375,30 @@ func updatePricing() {
 			audioCompletionRatio := ratio_setting.GetAudioCompletionRatio(model)
 			pricing.AudioCompletionRatio = &audioCompletionRatio
 		}
-		if billingMode := billing_setting.GetBillingMode(model); billingMode == "tiered_expr" {
+		providers := taskChannels.providers(pluginGeneration, model)
+		if billingMode := billing_setting.GetBillingMode(model); billingMode == billing_setting.BillingModeTieredExpr {
 			if expr, ok := billing_setting.GetBillingExpr(model); ok && strings.TrimSpace(expr) != "" {
 				pricing.BillingMode = billingMode
 				pricing.BillingExpr = expr
 			}
-		} else if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved && target.Declared != "" {
-			if tailMode := billing_setting.GetBillingMode(target.Declared); tailMode == "tiered_expr" {
-				if expr, ok := billing_setting.GetBillingExpr(target.Declared); ok && strings.TrimSpace(expr) != "" {
-					pricing.BillingMode = tailMode
-					pricing.BillingExpr = expr
+		} else {
+			var mappedModel string
+			if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved {
+				mappedModel = target.Declared
+			}
+			if len(providers) == 1 && !taskChannels.requiresProviderPricing(model) {
+				for _, mapped := range providers {
+					if mapped != model {
+						mappedModel = mapped
+					}
 				}
+			}
+			if expr, ok := billing_setting.ResolveTaskBillingExpr("", model, mappedModel); ok {
+				pricing.BillingMode = billing_setting.BillingModeTieredExpr
+				pricing.BillingExpr = expr
 			}
 		}
 		usageModel := model
-		providers := taskChannels.providers(pluginGeneration, model)
 		var plugin *jsplugin.LoadedPlugin
 		if len(providers) > 0 {
 			key := slices.Sorted(maps.Keys(providers))[0]
@@ -408,21 +415,24 @@ func updatePricing() {
 			pricing.BillingUsageSchema = jsplugin.CloneUsageSchema(usageSchema)
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)
 		}
-		hasProviderOverride := false
-		for key := range providers {
-			if _, configured := billing_setting.GetPluginBillingExpr(key, model); configured {
-				hasProviderOverride = true
+		hasProviderPricing := false
+		for key, mapped := range providers {
+			_, configured := billing_setting.GetPluginBillingExpr(key, model)
+			_, inherited := billing_setting.GetPluginBillingExpr(key, mapped)
+			if configured || (mapped != "" && inherited) ||
+				(len(providers) > 1 && mapped != "" && billing_setting.GetBillingMode(mapped) == billing_setting.BillingModeTieredExpr) {
+				hasProviderPricing = true
 				break
 			}
 		}
-		if hasProviderOverride || (len(providers) >= 2 && pricing.BillingMode == billing_setting.BillingModeTieredExpr) {
+		if hasProviderPricing || (len(providers) >= 2 && pricing.BillingMode == billing_setting.BillingModeTieredExpr) {
 			for _, key := range slices.Sorted(maps.Keys(providers)) {
 				provider, _ := pluginGeneration.Get(key)
 				schema, examples := provider.Meta.UsageForModel(providers[key])
 				if schema == nil {
 					schema = map[string]jsplugin.UsageFieldSchema{}
 				}
-				expression, hasExpression := billing_setting.ResolveTaskBillingExpr(provider.Meta.Key, model, "")
+				expression, hasExpression := billing_setting.ResolveTaskBillingExpr(key, model, providers[key])
 				mode := billing_setting.BillingModeRatio
 				if hasExpression || billing_setting.GetBillingMode(model) == billing_setting.BillingModeTieredExpr {
 					mode = billing_setting.BillingModeTieredExpr
@@ -431,7 +441,7 @@ func updatePricing() {
 					expression = ""
 				}
 				pricing.BillingPluginVariants = append(pricing.BillingPluginVariants, PricingPluginVariant{
-					PluginKey: provider.Meta.Key, PluginName: provider.Meta.Name, Icon: provider.Meta.Icon,
+					PluginKey:   key,
 					BillingExpr: expression, BillingMode: mode,
 					BillingUsageSchema: jsplugin.CloneUsageSchema(schema), BillingUsageExamples: jsplugin.CloneUsageExamples(examples),
 				})

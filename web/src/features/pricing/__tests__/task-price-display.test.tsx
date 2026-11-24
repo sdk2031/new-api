@@ -100,6 +100,42 @@ const model: PricingModel = {
 }
 const clients: QueryClient[] = []
 
+it('shows the base and group price for a 30-second interval without exposing the formula', () => {
+  vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  clients.push(client)
+  const billingExpr = 'tier("duration", ceil(u("seconds") / 30) * 3)'
+  render(
+    <QueryClientProvider client={client}>
+      <ModelDetailsContent
+        model={{
+          ...model,
+          model_name: 'seedance-2.5-480-720p',
+          billing_expr: billingExpr,
+          billing_usage_schema: {
+            seconds: { type: 'number', unit: 'second' },
+          },
+        }}
+        groupRatio={{ default: 2 }}
+        usableGroup={{ default: { desc: '', ratio: 2 } }}
+        endpointMap={{}}
+        autoGroups={[]}
+        priceRate={1}
+        usdExchangeRate={1}
+        tokenUnit='M'
+      />
+    </QueryClientProvider>
+  )
+  expect(screen.getByText('$3').parentElement).toHaveTextContent(/\$3\s*\/\s*30 s/)
+  const groupTable = within(screen.getByRole('table'))
+  expect(groupTable.getByRole('columnheader', { name: /30 s/ })).toBeVisible()
+  expect(groupTable.getByText('$6')).toBeVisible()
+  expect(screen.queryByText(billingExpr)).not.toBeInTheDocument()
+  expect(screen.queryByText('Special billing expression')).not.toBeInTheDocument()
+})
+
 it('falls back for omitted count labels and preserves canonical units for other quantities', () => {
   expect(taskUsageUnitLabel({ unit: 'count' }, 'zhCN', '次')).toBe('次')
   expect(
@@ -444,7 +480,7 @@ it('uses the same recharge conversion and token unit in task condition prices', 
   expect(screen.getAllByText('$3/1M token')).toHaveLength(2)
 })
 
-it('switches provider group prices, localized conditions and examples, and shows unconfigured providers', async () => {
+it('switches anonymous pricing tiers without exposing internal provider names', async () => {
   vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -523,20 +559,21 @@ it('switches provider group prices, localized conditions and examples, and shows
     </QueryClientProvider>
   )
   const user = userEvent.setup()
-  const alpha = screen.getByRole('tab', { name: 'Alpha' })
+  expect(screen.queryByRole('tab', { name: 'Alpha' })).not.toBeInTheDocument()
+  const alpha = screen.getByRole('tab', { name: 'Pricing tier 1' })
   expect(alpha).toHaveAttribute('aria-selected', 'true')
-  let panel = screen.getByRole('tabpanel', { name: 'Alpha' })
+  let panel = screen.getByRole('tabpanel', { name: 'Pricing tier 1' })
   expect(within(panel).getByText('Alpha sample')).toBeVisible()
   expect(within(panel).getByText('$0.8')).toBeVisible()
   await user.click(alpha)
   await user.keyboard('{ArrowRight}')
-  expect(screen.getByRole('tab', { name: 'Beta' })).toHaveFocus()
+  expect(screen.getByRole('tab', { name: 'Pricing tier 2' })).toHaveFocus()
   await user.keyboard('{Enter}')
-  expect(screen.getByRole('tab', { name: 'Beta' })).toHaveAttribute(
+  expect(screen.getByRole('tab', { name: 'Pricing tier 2' })).toHaveAttribute(
     'aria-selected',
     'true'
   )
-  panel = screen.getByRole('tabpanel', { name: 'Beta' })
+  panel = screen.getByRole('tabpanel', { name: 'Pricing tier 2' })
   expect(within(panel).getByText('Beta sample')).toBeVisible()
   expect(within(panel).queryByText('Alpha sample')).not.toBeInTheDocument()
   expect(within(panel).getByText('Professional mode')).toBeVisible()
@@ -545,16 +582,16 @@ it('switches provider group prices, localized conditions and examples, and shows
   await act(() => i18next.changeLanguage('zhCN'))
   expect(within(panel).getByText('专业模式')).toBeVisible()
   await act(() => i18next.changeLanguage('en'))
-  await user.click(screen.getByRole('tab', { name: 'Gamma' }))
-  panel = screen.getByRole('tabpanel', { name: 'Gamma' })
+  await user.click(screen.getByRole('tab', { name: 'Pricing tier 3' }))
+  panel = screen.getByRole('tabpanel', { name: 'Pricing tier 3' })
   expect(
     within(panel).getByText(
       'This model is billed by usage, but the administrator has not configured its pricing yet.'
     )
   ).toBeVisible()
   expect(within(panel).queryByRole('table')).not.toBeInTheDocument()
-  await user.click(screen.getByRole('tab', { name: 'Delta' }))
-  panel = screen.getByRole('tabpanel', { name: 'Delta' })
+  await user.click(screen.getByRole('tab', { name: 'Pricing tier 4' }))
+  panel = screen.getByRole('tabpanel', { name: 'Pricing tier 4' })
   expect(within(panel).getByText('$0.5')).toBeVisible()
 })
 

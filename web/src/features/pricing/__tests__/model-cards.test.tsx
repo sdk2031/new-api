@@ -401,7 +401,25 @@ describe('model cards', () => {
     expect(screen.getByText(/480p · 5s ≈/)).toBeVisible()
   })
 
-  it('keeps an unrecognized expression visible with the special billing message', () => {
+  it('shows duration prices per billing interval instead of a raw formula', () => {
+    const expression = 'tier("duration", ceil(u("seconds") / 30) * 3)'
+    render(
+      <ModelCard
+        model={pricingModel({
+          model_name: 'seedance-video',
+          billing_mode: 'tiered_expr',
+          billing_expr: expression,
+          billing_usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        })}
+        onClick={vi.fn()}
+      />
+    )
+    expect(screen.getByText('seedance-video')).toBeVisible()
+    expect(screen.getByText('$3').parentElement).toHaveTextContent('$3 / 30 s')
+    expect(screen.queryByText(expression)).not.toBeInTheDocument()
+  })
+
+  it('does not print an unrecognized pricing formula in the catalog', () => {
     const expression =
       'u("seconds") > 30 ? tier("long", u("seconds") * 0.3) : tier("short", u("seconds") * 0.4)'
     render(
@@ -415,7 +433,7 @@ describe('model cards', () => {
       />
     )
     expect(screen.getByText('Special billing expression')).toBeVisible()
-    expect(screen.getByText(expression)).toBeVisible()
+    expect(screen.queryByText(expression)).not.toBeInTheDocument()
   })
 
   it('keeps browsing and neutral health placeholders available after the metrics request fails', async () => {

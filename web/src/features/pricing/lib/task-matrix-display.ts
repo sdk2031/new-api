@@ -23,10 +23,38 @@ import {
   type TaskTierCondition,
 } from './billing-expr'
 import {
+  getTaskNumberFields,
   getTaskEnumFields,
   taskMatrixRowLabel,
   tryParseTaskMatrixConfig,
 } from './task-expr'
+
+export type DurationPrice = { interval: number; price: number }
+
+export function parseBillingInterval(value: string): number | null {
+  if (!/^\d+$/.test(value)) return null
+  const interval = Number(value)
+  return Number.isSafeInteger(interval) && interval > 0 ? interval : null
+}
+
+export function parseDurationPrice(
+  expression: string,
+  field?: string
+): DurationPrice | null {
+  if (!field) return null
+  const match =
+    /^tier\("(?:base|duration)",\s*(?:ceil\((u\("[^"]+"\))\s*\/\s*(\d+)\)|(u\("[^"]+"\)))\s*\*\s*([\d.eE+-]+)\)$/.exec(
+      expression.trim()
+    )
+  if (!match || (match[1] ?? match[3]) !== `u(${JSON.stringify(field)})`) {
+    return null
+  }
+  const interval = parseBillingInterval(match[2] ?? '1')
+  const price = Number(match[4])
+  if (interval === null || !Number.isFinite(price) || price < 0) return null
+  if (match[1] && interval === 1) return null
+  return { interval, price }
+}
 
 /**
  * Marketplace display helper: expand a recognized task matrix (flat/uniform
@@ -61,6 +89,26 @@ export function getTaskPricingDisplayTiers(
   expression: string | null | undefined,
   schema: BillingUsageSchema | null | undefined
 ): ParsedTaskTier[] {
+  const durationFields = getTaskNumberFields(schema ?? undefined).filter(
+    ([, field]) => field.unit === 'second'
+  )
+  if (durationFields.length === 1) {
+    const [field] = durationFields[0]
+    const duration = parseDurationPrice(expression || '', field)
+    if (duration && duration.interval > 1) {
+      return [
+        {
+          label: expression?.trim().startsWith('tier("duration",')
+            ? 'duration'
+            : 'base',
+          conditions: [],
+          constant: 0,
+          unitPrices: { [field]: duration.price },
+          billingInterval: duration.interval,
+        },
+      ]
+    }
+  }
   const tiers = parseTaskTiersFromExpr(expression || '', schema, true)
   const fallback = tiers.at(-1)
   if (!schema || tiers.length < 2 || !fallback) return tiers

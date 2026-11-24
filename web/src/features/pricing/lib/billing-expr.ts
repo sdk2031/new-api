@@ -277,6 +277,7 @@ export type ParsedTaskTier = {
   conditions: TaskTierCondition[]
   constant: number
   unitPrices: Record<string, number>
+  billingInterval?: number
 }
 
 // ---------------------------------------------------------------------------

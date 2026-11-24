@@ -114,9 +114,6 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           <span className='text-warning'>
             {t('Special billing expression')}
           </span>
-          <code className='text-muted-foreground mt-1 line-clamp-2 block font-mono text-xs break-all'>
-            {dynamicSummary.rawExpression}
-          </code>
         </div>
       )
     } else if (dynamicSummary.primaryEntries.length > 0) {

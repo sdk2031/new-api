@@ -109,7 +109,7 @@ export function ModelPriceCell(props: {
                 .join(' · ')}
             </span>
           )}
-          {props.showExpression !== false && (
+          {props.showExpression === true && (
             <code className='text-muted-foreground mt-1 line-clamp-2 block text-xs break-all whitespace-normal'>
               {dynamic.rawExpression}
             </code>

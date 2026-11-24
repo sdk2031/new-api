@@ -89,8 +89,13 @@ export function pluginUsageSchema(
   model: PricingModel | undefined,
   pluginKey: string | undefined
 ): BillingUsageSchema | undefined {
-  const variant = model?.billing_plugin_variants?.find(
-    (item) => item.plugin_key === pluginKey
+  const variants = model?.billing_plugin_variants
+  const variant = pluginKey
+    ? variants?.find((item) => item.plugin_key === pluginKey)
+    : undefined
+  return (
+    variant?.billing_usage_schema ??
+    (variants?.length === 1 ? variants[0].billing_usage_schema : undefined) ??
+    model?.billing_usage_schema
   )
-  return variant?.billing_usage_schema ?? model?.billing_usage_schema
 }

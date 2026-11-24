@@ -53,10 +53,19 @@ export function taskEnumLabel(
 }
 
 export function taskUsageUnitLabel(
-  definition: { unit?: string; unitLabel?: LocalizedTextValue } | undefined,
+  definition:
+    | {
+        unit?: string
+        unitLabel?: LocalizedTextValue
+        billingInterval?: number
+      }
+    | undefined,
   language: string,
   fallback: string
 ): string {
+  if (definition?.unit === 'second' && definition.billingInterval) {
+    return `${definition.billingInterval} ${fallback}`
+  }
   if (definition?.unit !== 'count') return fallback
   return resolveLocalizedText(definition.unitLabel, language) || fallback
 }

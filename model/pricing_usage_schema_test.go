@@ -38,6 +38,7 @@ func TestChannelScopedTaskModelCanSaveDurationPricing(t *testing.T) {
 	common.OptionMap = make(map[string]string)
 	t.Cleanup(func() { common.OptionMap = originalOptionMap })
 	const modelName = "test-channel-video"
+	const publicAlias = "public-video"
 	const pluginKey = "test-channel-duration"
 	source := strings.Replace(pricingUsagePluginSource("1.0.0", `{
 		seconds: {type: "number", unit: "second", description: "Video generation unit price"}
@@ -51,10 +52,12 @@ export function buildContentRequest() { return {}; }
 	require.NoError(t, err)
 	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(pluginKey) })
 
-	video := Channel{Id: 933, Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Models: modelName}
+	mapping := `{"public-video":"test-channel-video"}`
+	video := Channel{Id: 933, Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Models: modelName + "," + publicAlias, ModelMapping: &mapping}
 	video.SetSetting(dto.ChannelSettings{TaskPluginKey: pluginKey})
 	require.NoError(t, DB.Create(&video).Error)
 	insertPricingEndpointAbility(t, video.Id, modelName)
+	insertPricingEndpointAbility(t, video.Id, publicAlias)
 	image := Channel{Id: 934, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Models: "test-channel-image"}
 	image.SetSetting(dto.ChannelSettings{TaskPluginKey: pluginKey})
 	require.NoError(t, DB.Create(&image).Error)
@@ -83,7 +86,11 @@ export function buildContentRequest() { return {}; }
 			ModelName: modelName, ExpectedVersion: saved.Entries[0].Version, Reset: true,
 		}}))
 	})
-	assert.Equal(t, "second", pricingByModel(GetPricing())[modelName].BillingUsageSchema["seconds"].Unit)
+	pricing := pricingByModel(GetPricing())
+	assert.Equal(t, "second", pricing[modelName].BillingUsageSchema["seconds"].Unit)
+	require.Contains(t, pricing, publicAlias)
+	require.Len(t, pricing[publicAlias].BillingPluginVariants, 1)
+	assert.Equal(t, expression, pricing[publicAlias].BillingPluginVariants[0].BillingExpr)
 	saved, err := GetModelPricingSnapshot([]string{modelName})
 	require.NoError(t, err)
 	assert.Equal(t, expression, saved.Entries[0].PluginVariants[0].Effective)
@@ -389,4 +396,7 @@ func TestPricingSharedPluginVariantsUseEachSchemaAndExpression(t *testing.T) {
 	encoded, err := common.Marshal(single)
 	require.NoError(t, err)
 	assert.Contains(t, string(encoded), "billing_plugin_variants")
+	assert.NotContains(t, string(encoded), `"plugin_key"`)
+	assert.NotContains(t, string(encoded), `"plugin_name"`)
+	assert.NotContains(t, string(encoded), "pricing-beta")
 }
