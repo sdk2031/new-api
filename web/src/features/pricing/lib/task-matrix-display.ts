@@ -32,6 +32,7 @@ import {
 } from './task-expr'
 
 export type DurationPrice = { interval: number; price: number }
+export const DURATION_DEFAULT_TIER = 'duration_default'
 
 export function parseBillingInterval(value: string): number | null {
   if (!/^\d+$/.test(value)) return null
@@ -45,7 +46,7 @@ export function parseDurationPrice(
 ): DurationPrice | null {
   if (!field) return null
   const match =
-    /^tier\("(?:base|duration)",\s*(?:ceil\((u\("[^"]+"\))\s*\/\s*(\d+)\)|(u\("[^"]+"\)))\s*\*\s*([\d.eE+-]+)\)$/.exec(
+    /^tier\("(?:base|duration|duration_default)",\s*(?:ceil\((u\("[^"]+"\))\s*\/\s*(\d+)\)|(u\("[^"]+"\)))\s*\*\s*([\d.eE+-]+)\)$/.exec(
       expression.trim()
     )
   if (!match || (match[1] ?? match[3]) !== `u(${JSON.stringify(field)})`) {
@@ -63,7 +64,7 @@ export function parseResolutionDurationTiers(
   field: string,
   resolutions: readonly string[]
 ): ParsedTaskTier[] | null {
-  if (resolutions.length < 2) return null
+  if (resolutions.length === 0) return null
   const { billingExpr } = splitBillingExprAndRequestRules(expression)
   const compiled = compileBillingExpression(billingExpr)
   if (compiled.status !== 'ready') return null
@@ -78,7 +79,7 @@ export function parseResolutionDurationTiers(
       condition.operator !== '==' ||
       condition.left.kind !== 'call' ||
       condition.left.name !== 'u' ||
-      condition.left.args[0].kind !== 'literal' ||
+      condition.left.args[0]?.kind !== 'literal' ||
       condition.left.args[0].value !== 'resolution' ||
       condition.right.kind !== 'literal' ||
       typeof condition.right.value !== 'string' ||
@@ -103,18 +104,27 @@ export function parseResolutionDurationTiers(
     })
     node = node.no
   }
-  if (remaining.size !== 1 || interval === undefined) return null
+  if (interval === undefined) return null
   const fallback = parseDurationPrice(
     billingExpr.slice(node.start, node.end),
     field
   )
   if (!fallback || fallback.interval !== interval) return null
+  const explicitDefault =
+    node.kind === 'call' &&
+    node.name === 'tier' &&
+    node.args[0]?.kind === 'literal' &&
+    node.args[0].value === DURATION_DEFAULT_TIER
+  // Older rules use the last configured resolution as their catch-all.
+  if (!explicitDefault && remaining.size !== 1) return null
   const [resolution] = remaining
   return [
     ...tiers,
     {
-      label: resolution,
-      conditions: [{ field: 'resolution', value: resolution }],
+      label: explicitDefault ? DURATION_DEFAULT_TIER : resolution,
+      conditions: explicitDefault
+        ? []
+        : [{ field: 'resolution', value: resolution }],
       constant: 0,
       unitPrices: { [field]: fallback.price },
       billingInterval: interval > 1 ? interval : undefined,

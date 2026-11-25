@@ -128,12 +128,111 @@ it('shows each resolution and the shared interval in model group prices', () => 
       />
     </QueryClientProvider>
   )
-  expect(screen.getByRole('columnheader', { name: /30 s/ })).toBeVisible()
-  expect(screen.getByRole('row', { name: /480p\s+\$3$/ })).toBeVisible()
-  expect(screen.getByRole('row', { name: /720p\s+\$6$/ })).toBeVisible()
+  const baseTable = within(
+    screen.getByRole('region', { name: 'Base Price' })
+  ).getByRole('table', { name: 'Video · Every 30 seconds' })
+  const groupTable = within(
+    screen.getByRole('article', { name: 'default' })
+  ).getByRole('table', { name: 'Video · Every 30 seconds' })
+  expect(
+    within(baseTable).getByRole('row', { name: /480p\s+\$1\.5$/ })
+  ).toBeVisible()
+  expect(
+    within(baseTable).getByRole('row', { name: /720p\s+\$3$/ })
+  ).toBeVisible()
+  expect(
+    within(groupTable).getByRole('row', { name: /480p\s+\$3$/ })
+  ).toBeVisible()
+  expect(
+    within(groupTable).getByRole('row', { name: /720p\s+\$6$/ })
+  ).toBeVisible()
   expect(
     screen.queryByText('Special billing expression')
   ).not.toBeInTheDocument()
+})
+
+it('groups duration prices by configured generation mode and shows audio only when priced', () => {
+  vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <ModelDetailsContent
+        model={{
+          ...model,
+          billing_expr:
+            'u("action") == "text_to_video" && u("resolution") == "720p" && u("generate_audio") == true ? tier("text", u("seconds") * 1.5) : u("action") == "image_to_video" && u("resolution") == "1080p" ? tier("image", u("seconds") * 3) : tier("base", u("seconds") * 2)',
+          billing_usage_schema: {
+            seconds: { type: 'number', unit: 'second' },
+            resolution: { enum: ['480p', '720p', '1080p'] },
+            action: {
+              enum: ['text_to_video', 'image_to_video', 'video_to_video'],
+            },
+            generate_audio: { type: 'boolean' },
+          },
+        }}
+        groupRatio={{ default: 0.5 }}
+        usableGroup={{ default: { desc: '', ratio: 0.5 } }}
+        endpointMap={{}}
+        autoGroups={[]}
+        priceRate={1}
+        usdExchangeRate={1}
+        tokenUnit='M'
+      />
+    </QueryClientProvider>
+  )
+  const base = within(screen.getByRole('region', { name: 'Base Price' }))
+  const textTable = within(
+    base.getByRole('table', { name: 'Text to Video · Per second' })
+  )
+  expect(
+    textTable.getByRole('columnheader', { name: 'Audio track' })
+  ).toBeVisible()
+  expect(
+    textTable.getByRole('row', { name: /720p\s+Yes\s+\$1\.5$/ })
+  ).toBeVisible()
+  const imageTable = within(
+    base.getByRole('table', { name: 'Image to Video · Per second' })
+  )
+  expect(
+    imageTable.queryByRole('columnheader', { name: 'Audio track' })
+  ).not.toBeInTheDocument()
+  expect(imageTable.getByRole('row', { name: /1080p\s+\$3$/ })).toBeVisible()
+  expect(
+    base.queryByRole('table', { name: /Video to Video/ })
+  ).not.toBeInTheDocument()
+  expect(base.queryByText('480p')).not.toBeInTheDocument()
+  expect(base.getByText('Other cases')).toBeVisible()
+  const group = within(screen.getByRole('article', { name: 'default' }))
+  expect(
+    group.getByRole('row', { name: /720p\s+Yes\s+\$0\.75$/ })
+  ).toBeVisible()
+})
+
+it('shows selected duration tiers and the default without listing every plugin resolution', () => {
+  const schema: BillingUsageSchema = {
+    seconds: { type: 'number', unit: 'second' },
+    resolution: { enum: ['480p', '720p', '1080p'] },
+  }
+  const expression =
+    'u("resolution") == "720p" ? tier("duration", ceil(u("seconds") / 30) * 3) : tier("duration_default", ceil(u("seconds") / 30) * 1.5)'
+  const tiers = getTaskPricingDisplayTiers(expression, schema)
+  expect(
+    tiers.map(({ conditions, billingInterval, unitPrices }) => ({
+      conditions,
+      billingInterval,
+      unitPrices,
+    }))
+  ).toEqual([
+    {
+      conditions: [{ field: 'resolution', value: '720p' }],
+      billingInterval: 30,
+      unitPrices: { seconds: 3 },
+    },
+    { conditions: [], billingInterval: 30, unitPrices: { seconds: 1.5 } },
+  ])
 })
 
 it.each<BillingUsageSchema | undefined>([

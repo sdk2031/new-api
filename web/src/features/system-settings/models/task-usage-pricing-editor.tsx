@@ -16,13 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, X } from 'lucide-react'
 import { memo, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -73,6 +74,7 @@ import {
   type TaskVisualConfig,
 } from '@/features/pricing/lib/task-expr'
 import {
+  DURATION_DEFAULT_TIER,
   parseBillingInterval,
   parseDurationPrice,
   parseResolutionDurationTiers,
@@ -118,12 +120,15 @@ function readDurationRates(
   const uniform = parseDurationPrice(expression, field)
   if (uniform) return uniform
   const tiers = parseResolutionDurationTiers(expression, field, resolutions)
-  if (!tiers) return null
+  const fallback = tiers?.at(-1)
+  if (!tiers || !fallback) return null
   return {
-    interval: tiers[0].billingInterval ?? 1,
-    price: tiers[0].unitPrices[field],
+    interval: fallback.billingInterval ?? 1,
+    price: fallback.unitPrices[field],
     resolutionPrices: Object.fromEntries(
-      tiers.map((tier) => [tier.label, tier.unitPrices[field]])
+      tiers
+        .filter((tier) => tier.conditions.length > 0)
+        .map((tier) => [tier.label, tier.unitPrices[field]])
     ),
   }
 }
@@ -467,36 +472,37 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     const usage = `u(${JSON.stringify(durationField)})`
     const quantity =
       next.interval > 1 ? `ceil(${usage} / ${next.interval})` : usage
-    const tier = (price: number) =>
-      `tier("duration", ${quantity} * ${formatPricingNumber(price)})`
-    if (resolutions.length > 1 && next.resolutionPrices) {
-      const branches = resolutions.map((resolution, index) => {
-        const value = tier(next.resolutionPrices?.[resolution] ?? next.price)
-        return index === resolutions.length - 1
-          ? value
-          : `u("resolution") == ${JSON.stringify(resolution)} ? ${value}`
-      })
-      props.onBillingExprChange(branches.join(' : '))
-    } else {
-      props.onBillingExprChange(tier(next.price))
-    }
+    const tier = (name: string, price: number) =>
+      `tier("${name}", ${quantity} * ${formatPricingNumber(price)})`
+    const branches = Object.entries(next.resolutionPrices ?? {}).map(
+      ([resolution, price]) =>
+        `u("resolution") == ${JSON.stringify(resolution)} ? ${tier('duration', price)}`
+    )
+    branches.push(
+      tier(branches.length > 0 ? DURATION_DEFAULT_TIER : 'duration', next.price)
+    )
+    props.onBillingExprChange(branches.join(' : '))
   }
 
   const setDurationRate = (value: string, resolution?: string) => {
     const price = Number(value)
-    if (resolution === undefined || resolutions.length <= 1) {
+    if (resolution === undefined) {
       publishDurationPrice({ ...durationPrice, price })
       return
     }
-    const resolutionPrices =
-      durationPrice.resolutionPrices ??
-      Object.fromEntries(
-        resolutions.map((option) => [option, durationPrice.price])
-      )
     publishDurationPrice({
       ...durationPrice,
-      resolutionPrices: { ...resolutionPrices, [resolution]: price },
+      resolutionPrices: {
+        ...durationPrice.resolutionPrices,
+        [resolution]: price,
+      },
     })
+  }
+
+  const removeDurationResolution = (resolution: string) => {
+    const resolutionPrices = { ...durationPrice.resolutionPrices }
+    delete resolutionPrices[resolution]
+    publishDurationPrice({ ...durationPrice, resolutionPrices })
   }
 
   const setDurationBillingMode = (mode: unknown) => {
@@ -597,9 +603,22 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     i18n.language
   )
   const previewSeconds = Number(previewSample[durationField ?? ''] ?? 0)
-  const selectedResolution = String(
-    previewSample.resolution ?? resolutions[0] ?? ''
+  const resolutionOptions = resolutions.map((value) => ({
+    value,
+    label: taskEnumLabel(props.usageSchema.resolution, value, i18n.language),
+  }))
+  const configuredResolutions = resolutionOptions.filter(({ value }) =>
+    Object.hasOwn(durationPrice.resolutionPrices ?? {}, value)
   )
+  const availableResolutions = resolutionOptions.filter(
+    ({ value }) => !Object.hasOwn(durationPrice.resolutionPrices ?? {}, value)
+  )
+  const defaultResolutionOption = { value: '', label: t('Other cases') }
+  const selectedResolution = configuredResolutions.some(
+    ({ value }) => value === previewSample.resolution
+  )
+    ? String(previewSample.resolution)
+    : defaultResolutionOption.value
   const selectedDurationPrice =
     durationPrice.resolutionPrices?.[selectedResolution] ?? durationPrice.price
   const previewBaseCost =
@@ -763,54 +782,100 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
               </Field>
             )}
             {resolutions.length > 0 ? (
-              <div className='min-w-0 sm:col-span-2'>
+              <div className='min-w-0 space-y-2 sm:col-span-2'>
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead scope='col'>{resolutionLabel}</TableHead>
                       <TableHead scope='col'>{t('Billing unit')}</TableHead>
                       <TableHead scope='col'>{t('Unit price')}</TableHead>
+                      <TableHead scope='col' className='w-10'>
+                        <span className='sr-only'>{t('Actions')}</span>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {resolutions.map((resolution) => {
-                      const label = taskEnumLabel(
-                        props.usageSchema.resolution,
-                        resolution,
-                        i18n.language
-                      )
-                      return (
-                        <TableRow key={resolution}>
-                          <TableHead scope='row'>{label}</TableHead>
-                          <TableCell>
-                            {blockPricing
-                              ? t('Every {{seconds}} seconds', {
-                                  seconds: durationPrice.interval,
-                                })
-                              : t('Per second')}
-                          </TableCell>
-                          <TableCell className='min-w-28'>
-                            <PricingAmountInput
-                              key={blockPricing ? 'block' : 'second'}
-                              currency={props.currency}
-                              aria-label={t('Unit price: {{field}}', {
-                                field: label,
-                              })}
-                              disabled={blockPricing && validInterval === null}
-                              value={
-                                durationPrice.resolutionPrices?.[resolution] ??
-                                durationPrice.price
-                              }
-                              onChange={(value) =>
-                                setDurationRate(value, resolution)
-                              }
-                            />
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })}
+                    {[...configuredResolutions, defaultResolutionOption].map(
+                      ({ value: resolution, label }) => {
+                        const isDefault =
+                          resolution === defaultResolutionOption.value
+                        return (
+                          <TableRow key={resolution}>
+                            <TableHead scope='row'>{label}</TableHead>
+                            <TableCell>
+                              {blockPricing
+                                ? t('Every {{seconds}} seconds', {
+                                    seconds: durationPrice.interval,
+                                  })
+                                : t('Per second')}
+                            </TableCell>
+                            <TableCell className='min-w-28'>
+                              <PricingAmountInput
+                                key={blockPricing ? 'block' : 'second'}
+                                currency={props.currency}
+                                aria-label={t('Unit price: {{field}}', {
+                                  field: label,
+                                })}
+                                disabled={
+                                  blockPricing && validInterval === null
+                                }
+                                value={
+                                  durationPrice.resolutionPrices?.[
+                                    resolution
+                                  ] ?? durationPrice.price
+                                }
+                                onChange={(value) =>
+                                  setDurationRate(
+                                    value,
+                                    isDefault ? undefined : resolution
+                                  )
+                                }
+                              />
+                            </TableCell>
+                            <TableCell>
+                              {!isDefault && (
+                                <Button
+                                  type='button'
+                                  variant='ghost'
+                                  size='icon-sm'
+                                  aria-label={t('Remove {{value}}', {
+                                    value: label,
+                                  })}
+                                  onClick={() =>
+                                    removeDurationResolution(resolution)
+                                  }
+                                >
+                                  <X aria-hidden='true' />
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      }
+                    )}
                   </TableBody>
                 </Table>
+                {availableResolutions.length > 0 && (
+                  <Select
+                    value={null}
+                    items={availableResolutions}
+                    onValueChange={(value) => {
+                      if (value === null) return
+                      setDurationRate(String(durationPrice.price), value)
+                    }}
+                  >
+                    <SelectTrigger aria-label={t('Add resolution')} size='sm'>
+                      <SelectValue placeholder={t('Add resolution')} />
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      {availableResolutions.map(({ value, label }) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             ) : (
               <Field className={blockPricing ? undefined : 'sm:col-span-2'}>
@@ -825,7 +890,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                 />
               </Field>
             )}
-            {resolutions.length > 1 && (
+            {configuredResolutions.length > 0 && (
               <Field>
                 <FieldLabel>{resolutionLabel}</FieldLabel>
                 <Select
@@ -835,34 +900,27 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                       handlePreviewSampleChange('resolution', value)
                     }
                   }}
-                  items={resolutions.map((value) => ({
-                    value,
-                    label: taskEnumLabel(
-                      props.usageSchema.resolution,
-                      value,
-                      i18n.language
-                    ),
-                  }))}
+                  items={[...configuredResolutions, defaultResolutionOption]}
                 >
                   <SelectTrigger aria-label={resolutionLabel}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {resolutions.map((value) => (
-                      <SelectItem key={value} value={value}>
-                        {taskEnumLabel(
-                          props.usageSchema.resolution,
-                          value,
-                          i18n.language
-                        )}
-                      </SelectItem>
-                    ))}
+                    {[...configuredResolutions, defaultResolutionOption].map(
+                      ({ value, label }) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      )
+                    )}
                   </SelectContent>
                 </Select>
               </Field>
             )}
             <Field
-              className={resolutions.length > 1 ? undefined : 'sm:col-span-2'}
+              className={
+                configuredResolutions.length > 0 ? undefined : 'sm:col-span-2'
+              }
             >
               <FieldLabel>{t('Preview duration (seconds)')}</FieldLabel>
               <Input

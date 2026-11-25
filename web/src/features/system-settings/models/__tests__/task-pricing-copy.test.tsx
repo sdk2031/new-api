@@ -200,7 +200,7 @@ it('edits video prices by resolution without presenting aspect ratio as a price 
     within(durationTable)
       .getAllByRole('columnheader')
       .map((cell) => cell.textContent)
-  ).toEqual(['Resolution', 'Billing unit', 'Unit price'])
+  ).toEqual(['Resolution', 'Billing unit', 'Unit price', 'Actions'])
   const row = within(durationTable).getByRole('row', { name: /^720p / })
   expect(within(row).getByText('Every 30 seconds')).toBeVisible()
   const price = within(row).getByRole('textbox', {
@@ -218,12 +218,13 @@ it('edits video prices by resolution without presenting aspect ratio as a price 
   expect(screen.getByText('Preview base cost: $3')).toBeVisible()
   fireEvent.change(price, { target: { value: '4' } })
   expect(onChange).toHaveBeenLastCalledWith(
-    'u("resolution") == "480p" ? tier("duration", ceil(u("seconds") / 30) * 1.5) : u("resolution") == "720p" ? tier("duration", ceil(u("seconds") / 30) * 4) : tier("duration", ceil(u("seconds") / 30) * 6)'
+    'u("resolution") == "480p" ? tier("duration", ceil(u("seconds") / 30) * 1.5) : u("resolution") == "720p" ? tier("duration", ceil(u("seconds") / 30) * 4) : u("resolution") == "1080p" ? tier("duration", ceil(u("seconds") / 30) * 6) : tier("duration_default", ceil(u("seconds") / 30) * 6)'
   )
   expect(screen.getByText('Preview base cost: $4')).toBeVisible()
 })
 
-it('preserves the shared per-second rate on untouched resolutions', () => {
+it('adds only selected resolutions and restores the default rate when a row is removed', async () => {
+  const user = userEvent.setup()
   const onChange = vi.fn()
   render(
     <TaskPricingDraft
@@ -233,12 +234,29 @@ it('preserves the shared per-second rate on untouched resolutions', () => {
     />
   )
   const table = screen.getByRole('table')
-  expect(within(table).getAllByText('Per second')).toHaveLength(3)
+  expect(within(table).getAllByRole('rowheader')).toHaveLength(1)
+  expect(
+    within(table).getByRole('rowheader', { name: 'Other cases' })
+  ).toBeVisible()
+  expect(onChange).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('combobox', { name: 'Add resolution' }))
+  await user.click(screen.getByRole('option', { name: '720p' }))
   const price = within(table).getByRole('textbox', { name: 'Unit price: 720p' })
   expect(price).toHaveValue('0.4')
   fireEvent.change(price, { target: { value: '0.8' } })
   expect(onChange).toHaveBeenLastCalledWith(
-    'u("resolution") == "480p" ? tier("duration", u("seconds") * 0.4) : u("resolution") == "720p" ? tier("duration", u("seconds") * 0.8) : tier("duration", u("seconds") * 0.4)'
+    'u("resolution") == "720p" ? tier("duration", u("seconds") * 0.8) : tier("duration_default", u("seconds") * 0.4)'
+  )
+  await user.click(screen.getByRole('combobox', { name: 'Add resolution' }))
+  expect(screen.queryByRole('option', { name: '720p' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('option', { name: '1080p' }))
+  await user.click(within(table).getByRole('button', { name: 'Remove 1080p' }))
+  expect(
+    within(table).queryByRole('rowheader', { name: '1080p' })
+  ).not.toBeInTheDocument()
+  await user.click(within(table).getByRole('button', { name: 'Remove 720p' }))
+  expect(onChange).toHaveBeenLastCalledWith(
+    'tier("duration", u("seconds") * 0.4)'
   )
 })
 

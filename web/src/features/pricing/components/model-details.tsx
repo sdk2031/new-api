@@ -65,6 +65,7 @@ import { useBillingTime } from '../hooks/use-billing-time'
 import { usePricingData } from '../hooks/use-pricing-data'
 import type { ParsedTaskTier } from '../lib/billing-expr'
 import { formatBillingCondition } from '../lib/billing-expression/condition-display'
+import { getDurationPriceSections } from '../lib/duration-price-sections'
 import {
   formatTaskUsageUnitPrice,
   getDynamicPriceEntries,
@@ -98,6 +99,7 @@ import type {
   PricingModel,
   TokenUnit,
 } from '../types'
+import { DurationPriceTables } from './duration-price-tables'
 import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelDetailsApi } from './model-details-api'
@@ -1128,6 +1130,49 @@ function ProviderGroupPricingSection(
   )
 
   if (isDynamicPricingModel(props.model)) {
+    const durationPricing = getDurationPriceSections(props.model)
+    if (durationPricing) {
+      return (
+        <section>
+          {!props.hideTitle && (
+            <SectionTitle>{t('Pricing by Group')}</SectionTitle>
+          )}
+          <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
+          <div className='space-y-3'>
+            {availableGroups.map((group) => {
+              const ratio =
+                props.groupRatio[group] ?? props.usableGroup[group]?.ratio ?? 1
+              return (
+                <article
+                  key={group}
+                  aria-label={group}
+                  className='grid overflow-hidden rounded-xl border @lg/details:grid-cols-[minmax(8rem,1fr)_3fr]'
+                >
+                  <div className='bg-muted/25 flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5 @lg/details:flex-col @lg/details:items-start @lg/details:justify-start @lg/details:border-e @lg/details:border-b-0 @lg/details:p-3'>
+                    <GroupBadge group={group} size='sm' />
+                    <span className='text-muted-foreground font-mono text-xs'>
+                      {t('Ratio')} ×{ratio}
+                    </span>
+                  </div>
+                  <div className='min-w-0 p-3'>
+                    <DurationPriceTables
+                      {...durationPricing}
+                      priceOptions={{
+                        tokenUnit: props.tokenUnit,
+                        showRechargePrice,
+                        priceRate: props.priceRate,
+                        usdExchangeRate: props.usdExchangeRate,
+                        groupRatioMultiplier: ratio,
+                      }}
+                    />
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+        </section>
+      )
+    }
     const dynamicTiers = getDynamicPricingTiers(props.model)
     const hasRequestPrice = dynamicTiers.some(
       (tier) => !('unitPrices' in tier) && tier.billingUnit === 'request'
@@ -1473,17 +1518,25 @@ export interface ModelDetailsContentProps {
 export function ModelDetailsContent(props: ModelDetailsContentProps) {
   const { t } = useTranslation()
   const showRechargePrice = props.showRechargePrice ?? false
+  const variants = props.model.billing_plugin_variants ?? []
+  const baseModel = variants[0]
+    ? withPluginPricing(props.model, variants[0])
+    : props.model
+  const durationPricing =
+    variants.length > 1 ? null : getDurationPriceSections(baseModel)
 
   const isDynamic =
     props.model.billing_mode === 'tiered_expr' &&
     Boolean(props.model.billing_expr)
 
-  const simpleTaskPricing = hasSimpleTaskPricing(props.model)
+  const simpleTaskPricing =
+    !durationPricing && hasSimpleTaskPricing(props.model)
   const usageSchema = getTaskPricingDisplaySchema(props.model)
   const showBasePrices =
-    !usageSchema ||
-    simpleTaskPricing ||
-    getDynamicPricingTiers(props.model).length === 0
+    !durationPricing &&
+    (!usageSchema ||
+      simpleTaskPricing ||
+      getDynamicPricingTiers(props.model).length === 0)
 
   return (
     <div className='@container/details space-y-4'>
@@ -1511,6 +1564,20 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
 
           <section className='bg-card/60 space-y-5 rounded-xl border p-4 shadow-sm'>
             <SectionTitle>{t('Pricing')}</SectionTitle>
+            {durationPricing && (
+              <section aria-label={t('Base Price')}>
+                <SectionTitle>{t('Base Price')}</SectionTitle>
+                <DurationPriceTables
+                  {...durationPricing}
+                  priceOptions={{
+                    tokenUnit: props.tokenUnit,
+                    showRechargePrice,
+                    priceRate: props.priceRate,
+                    usdExchangeRate: props.usdExchangeRate,
+                  }}
+                />
+              </section>
+            )}
             {showBasePrices && (
               <PriceSection
                 model={props.model}
@@ -1520,7 +1587,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
                 showRechargePrice={showRechargePrice}
               />
             )}
-            {isDynamic && !simpleTaskPricing && (
+            {!durationPricing && isDynamic && !simpleTaskPricing && (
               <DynamicPricingBreakdown
                 billingExpr={props.model.billing_expr}
                 usageSchema={usageSchema}
